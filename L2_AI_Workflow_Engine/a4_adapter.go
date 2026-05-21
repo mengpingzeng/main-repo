@@ -1,0 +1,99 @@
+package workflow_engine
+
+import (
+	"context"
+	"time"
+
+	"a4md"
+)
+
+type RealMDWriterAdapter struct {
+	service *a4md.Service
+}
+
+func NewRealMDWriterAdapter(storageDir string) (*RealMDWriterAdapter, error) {
+	storage, err := a4md.NewLocalFSStorage(storageDir)
+	if err != nil {
+		return nil, err
+	}
+
+	engine, err := a4md.NewTemplateEngine("v1")
+	if err != nil {
+		return nil, err
+	}
+
+	svc := a4md.NewService(storage, nil, engine, nil)
+	return &RealMDWriterAdapter{service: svc}, nil
+}
+
+func (a *RealMDWriterAdapter) WriteMD(ctx context.Context, req MDWriteRequest) (string, error) {
+	publishResults := make([]a4md.PublishResult, len(req.PublishResults))
+	for i, r := range req.PublishResults {
+		publishResults[i] = a4md.PublishResult{
+			AccountID:     r.AccountID,
+			Platform:      r.Platform,
+			Status:        r.Status,
+			PostID:        r.PostID,
+			ErrorCode:     r.ErrorCode,
+			MaskedDisplay: r.MaskedDisplay,
+		}
+	}
+
+	sessions := make([]a4md.SessionInfo, len(req.Sessions))
+	for i, s := range req.Sessions {
+		episodes := make([]a4md.EpisodeSummary, len(s.Episodes))
+		for j, e := range s.Episodes {
+			episodes[j] = a4md.EpisodeSummary{
+				EpisodeID:  e.EpisodeID,
+				EpochNo:    e.EpochNo,
+				UserIntent: e.UserIntent,
+				Decisions:  e.Decisions,
+				SummaryOSS: e.SummaryOSS,
+			}
+		}
+		sessions[i] = a4md.SessionInfo{
+			SessionID:    s.SessionID,
+			StartedAt:    s.StartedAt,
+			EndedAt:      s.EndedAt,
+			MessageCount: s.MessageCount,
+			Episodes:     episodes,
+			DraftVersion: s.DraftVersion,
+		}
+	}
+
+	products := a4md.Products{
+		XhsText:      req.Products.XhsText,
+		WechatHTML:   req.Products.WechatHTML,
+		FanqieNovel:  req.Products.FanqieNovel,
+		ZhulangNovel: req.Products.ZhulangNovel,
+		Others:       req.Products.Others,
+	}
+
+	createdAt := req.CreatedAt
+	if createdAt.IsZero() {
+		createdAt = time.Now().UTC()
+	}
+
+	result, err := a.service.WriteMD(ctx, a4md.WriteMDInput{
+		TaskID:         req.TaskID,
+		UID:            req.UID,
+		Topic:          req.Topic,
+		CreatedAt:      createdAt,
+		SkillID:        req.SkillID,
+		SkillName:      req.SkillName,
+		SkillVersion:   req.SkillVersion,
+		Model:          req.Model,
+		Sessions:       sessions,
+		DraftVersion:   req.DraftVersion,
+		Products:       products,
+		PublishResults: publishResults,
+		EpisodeIDs:     req.EpisodeIDs,
+		TraceID:        req.TraceID,
+	})
+	if err != nil {
+		return "", err
+	}
+	return result.MDPath, nil
+}
+
+var _ MDWriter = (*RealMDWriterAdapter)(nil)
