@@ -1,0 +1,69 @@
+# {{.Topic}}
+
+## 任务信息
+| 字段 | 值 |
+|---|---|
+| Task ID | {{.TaskID}} |
+| 用户 ID | {{.UID}} |
+| 创建时间 | {{.CreatedAt}} |
+| 使用 Skill | {{.SkillName}} (ID: {{.SkillID}}, v{{.SkillVersion}}) |
+| 使用 Model | {{.Model}} |
+| 最终 Draft 版本 | v{{.DraftVersion}} |
+
+## 会话历程
+{{range $i, $s := .Sessions}}
+### Session-{{add $i 1}}（{{$s.SessionID}}）
+- **起止时间**：{{$s.StartedAt}} ~ {{$s.EndedAt}}
+- **消息总数**：{{$s.MessageCount}}
+- **产出 Draft 版本**：v{{$s.DraftVersion}}
+{{if $s.Episodes}}
+#### Episode 摘要
+{{range $s.Episodes}}
+**Episode {{.EpochNo}}**（{{.EpisodeID}}）
+- 用户核心诉求：{{.UserIntent}}
+- Agent 关键决定：{{.Decisions}}
+{{end}}
+{{end}}
+{{end}}
+
+## 最终产物
+### 小红书文案
+{{.Products.XhsText}}
+
+### 公众号长文
+{{.Products.WechatHTML}}
+
+{{if .Products.FanqieNovel}}
+### 番茄小说
+{{.Products.FanqieNovel}}
+{{end}}
+
+{{if .Products.ZhulangNovel}}
+### 逐浪网
+{{.Products.ZhulangNovel}}
+{{end}}
+
+{{if .Products.Others}}
+### 其他平台
+{{range $platform, $content := .Products.Others}}
+#### {{$platform}}
+{{$content}}
+{{end}}
+{{end}}
+
+## 发布结果
+| 账号 | 账号标识 | 平台 | 状态 | 错误码 | Post ID | 发布链接 |
+|---|---|---|---|---|---|---|
+{{range .PublishResults}}| {{.AccountID}} | {{if .MaskedDisplay}}{{.MaskedDisplay}}{{else}}-{{end}} | {{.Platform}} | {{if eq .Status "ok"}}成功{{else}}失败{{end}} | {{if .ErrorCode}}{{.ErrorCode}}{{else}}-{{end}} | {{if .PostID}}{{.PostID}}{{else}}-{{end}} | {{if .PostURL}}{{.PostURL}}{{else}}-{{end}} |
+{{end}}
+
+{{if .StatsGroups}}
+## 数据反馈
+{{range .StatsGroups}}
+### {{.Period}}数据
+| 账号 | 平台 | 阅读 | 点赞 | 评论 | 分享 |
+|---|---|---|---|---|---|
+{{range .Items}}| {{.AccountID}} | {{.Platform}} | {{.Views}} | {{.Likes}} | {{.Comments}} | {{.Shares}} |
+{{end}}
+{{end}}
+{{end}}

@@ -1,0 +1,5 @@
+### {{.Period}}数据
+| 账号 | 平台 | 阅读 | 点赞 | 评论 | 分享 |
+|---|---|---|---|---|
+{{range .Items}}| {{.AccountID}} | {{.Platform}} | {{.Views}} | {{.Likes}} | {{.Comments}} | {{.Shares}} |
+{{end}}
