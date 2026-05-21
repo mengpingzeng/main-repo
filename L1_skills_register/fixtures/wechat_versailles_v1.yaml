@@ -1,0 +1,43 @@
+id: wechat_versailles_v1
+name: 朋友圈凡尔赛文学 v1
+version: 1.0.0
+category: preset
+description: "适合朋友圈/社交媒体凡尔赛风格文学创作，表面抱怨实则炫耀，看似随意实则精心设计，200-500字"
+inputs:
+  topic:
+    type: string
+    required: true
+  style_hint:
+    type: string
+    required: false
+    default: "凡尔赛、低调炫耀"
+targets:
+  - moment_text
+model_recommended:
+  primary: deepseek-chat
+  fallback:
+    - hy3-preview
+prompt_template: prompt.tmpl
+output_schema:
+  type: object
+  required:
+    - moment_text
+    - hidden_bragging_points
+  properties:
+    moment_text:
+      type: string
+      minLength: 100
+      maxLength: 600
+    hidden_bragging_points:
+      type: array
+      items:
+        type: string
+      description: "AI 自查本次文案中暗藏了哪些炫耀点"
+      minItems: 1
+      maxItems: 5
+post_hook: ""
+visibility: public
+status: active
+scripts_path: ""
+templates_path: ""
+examples_path: ""

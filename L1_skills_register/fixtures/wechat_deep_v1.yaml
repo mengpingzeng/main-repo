@@ -1,0 +1,40 @@
+id: wechat_deep_v1
+name: 公众号深度长文 v1
+version: 1.0.0
+category: preset
+description: 适合公众号深度内容，专业有料、结构化小标题、1500-3000字
+targets:
+  - wechat_html
+model_recommended:
+  primary: deepseek-chat
+  fallback:
+    - hy3-preview
+prompt_template: prompt.tmpl
+output_schema:
+  type: object
+  required:
+    - title
+    - sections
+    - wechat_html
+  properties:
+    title:
+      type: string
+      minLength: 5
+      maxLength: 40
+    sections:
+      type: array
+      items:
+        type: object
+        properties:
+          subtitle:
+            type: string
+          content:
+            type: string
+    wechat_html:
+      type: string
+post_hook: wechat_md_to_html
+visibility: public
+status: active
+scripts_path: ""
+templates_path: ""
+examples_path: ""

@@ -1,0 +1,23 @@
+id: general_fallback_v1
+name: 通用兜底 v1
+version: 1.0.0
+category: preset
+description: 万能通用风格，无平台限制，按用户输入自由发挥
+targets: []
+model_recommended:
+  primary: deepseek-chat
+  fallback:
+    - hy3-preview
+prompt_template: prompt.tmpl
+output_schema:
+  type: object
+  required:
+    - content
+  properties:
+    content:
+      type: string
+visibility: public
+status: active
+scripts_path: ""
+templates_path: ""
+examples_path: ""
