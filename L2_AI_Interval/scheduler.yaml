@@ -1,0 +1,13 @@
+# 定时调度器默认配置
+scheduler:
+  cron_expr:      "0,30 * * * *"
+  batch_size:     10
+  fetch_timeout:  30s
+  batch_interval: 200ms
+  lookback_days:  30
+  max_retry:      1
+  retry_backoff:  1s
+  listen_port:    9104
+
+database:
+  dsn: "root:password@tcp(127.0.0.1:3306)/xlongxia?parseTime=true"
