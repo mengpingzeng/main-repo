@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>番茄账号管家</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      width: 290px;
+      padding: 16px;
+      font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Helvetica Neue', sans-serif;
+      font-size: 13px;
+      background: #fff;
+      color: #1d2129;
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+    .header-icon { font-size: 18px; }
+    .header-title { font-size: 14px; font-weight: 600; color: #1d2129; }
+    .header-version { font-size: 11px; color: #c9cdd4; margin-left: auto; }
+
+    .status-bar {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 8px 10px;
+      border-radius: 6px;
+      font-size: 12px;
+      margin-bottom: 14px;
+    }
+    .status-idle { background: #f7f8fa; color: #86909c; }
+    .status-active { background: #e8f3ff; color: #1677ff; }
+    .status-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+    .dot-idle { background: #c9cdd4; }
+    .dot-active { background: #1677ff; animation: blink 1.2s ease-in-out infinite; }
+    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+    .section-label {
+      font-size: 11px;
+      color: #86909c;
+      margin-bottom: 5px;
+    }
+    .input-row {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 4px;
+    }
+    input[type="text"] {
+      flex: 1;
+      padding: 6px 9px;
+      border: 1px solid #e5e6eb;
+      border-radius: 5px;
+      font-size: 12px;
+      color: #1d2129;
+      outline: none;
+      min-width: 0;
+    }
+    input[type="text"]:focus { border-color: #635bff; }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 6px 12px;
+      border-radius: 5px;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      border: none;
+      white-space: nowrap;
+      transition: opacity .15s;
+    }
+    .btn:hover { opacity: .82; }
+    .btn-ghost { background: #f2f3f5; color: #4e5969; }
+    .btn-primary { background: #635bff; color: #fff; width: 100%; margin-top: 8px; }
+
+    .save-tip {
+      font-size: 11px;
+      color: #22c55e;
+      margin-top: 4px;
+      min-height: 16px;
+    }
+
+    hr { border: none; border-top: 1px solid #f0f0f0; margin: 12px 0; }
+
+    .steps {
+      font-size: 11px;
+      color: #86909c;
+      line-height: 1.8;
+    }
+    .steps span { color: #4e5969; font-weight: 500; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <span class="header-icon">🦞</span>
+    <span class="header-title">番茄账号管家</span>
+    <span class="header-version">v1.0</span>
+  </div>
+
+  <div id="statusBar" class="status-bar status-idle">
+    <span id="statusDot" class="status-dot dot-idle"></span>
+    <span id="statusText">就绪</span>
+  </div>
+
+  <div class="section-label">管理平台地址</div>
+  <div class="input-row">
+    <input id="serverUrl" type="text" placeholder="http://47.107.124.45:3000">
+    <button class="btn btn-ghost" id="saveBtn">保存</button>
+  </div>
+  <div id="saveTip" class="save-tip"></div>
+
+  <button class="btn btn-primary" id="openBtn">打开账号管理页面</button>
+
+  <hr>
+
+  <div class="steps">
+    使用步骤：<br>
+    1. 点上方按钮打开管理页面<br>
+    2. 点击「绑定账号」→ 选择<span>番茄小说</span><br>
+    3. 点击「<span>自动获取 Cookie</span>」按钮<br>
+    4. 在弹出页面完成验证码登录<br>
+    5. 登录成功后 Cookie 将<span>自动填入</span>表单
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

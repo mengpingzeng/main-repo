@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "番茄账号管家",
+  "version": "1.0.0",
+  "description": "自动抓取番茄小说账号 Cookie，同步到创作平台账号管理系统",
+  "permissions": [
+    "cookies",
+    "tabs",
+    "windows",
+    "browsingData",
+    "storage",
+    "scripting"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "番茄账号管家"
+  }
+}
