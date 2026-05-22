@@ -162,6 +162,17 @@ func (a *FanqiePublishAdapter) Publish(ctx context.Context, product ProductConte
 	stderrStr := stderr.String()
 	stdoutStr := strings.TrimSpace(stdout.String())
 
+	// 始终打印脚本日志，便于排查发布流程
+	if len(stderrStr) > 0 {
+		var stderrLog string
+		if len(stderrStr) > 2000 {
+			stderrLog = stderrStr[len(stderrStr)-2000:]
+		} else {
+			stderrLog = stderrStr
+		}
+		log.Printf("[fanqie] script log: %s", stderrLog)
+	}
+
 	// Try to parse stdout first, even on error — the script always writes
 	// JSON to stdout (both success and failure), and its error messages
 	// are more useful than generic "exit status 1".

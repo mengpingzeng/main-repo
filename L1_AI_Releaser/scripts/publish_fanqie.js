@@ -397,7 +397,43 @@ async function doPublish(cookieStr, input) {
         await handlePublishSettings(page);
         await sleep(2000);
 
-        // === 9. 简化发布提交流程：不断点击当前页面可见的「下一步」或「确认发布」按钮 ===
+            // === 9.5 通用弹窗兜底：扫描页面上所有可见弹窗，盲点确认按钮 ===
+            try {
+                const handled = await page.evaluate(() => {
+                    // 查找所有可见的弹窗/对话框/浮层
+                    const modalEls = document.querySelectorAll('[class*="modal"], [class*="dialog"], [class*="popup"], [class*="drawer"], [class*="overlay"], [role="dialog"], [role="alertdialog"]');
+                    for (const modal of modalEls) {
+                        if (modal.offsetParent === null) continue;
+                        const btns = modal.querySelectorAll('button');
+                        const confirmTexts = ['确定', '确认', '提交', '发布', '我知道了', '知道了', '好的', '是', '确认发布', '确定提交', '立即发布', '继续', '下一步'];
+                        for (const btn of btns) {
+                            if (btn.offsetParent === null || btn.disabled) continue;
+                            const t = (btn.textContent || '').trim();
+                            if (confirmTexts.some(ct => t === ct || t.includes(ct))) {
+                                btn.click();
+                                return 'clicked:' + t;
+                            }
+                        }
+                        // 兜底：点弹窗里最后一个非取消按钮
+                        const nonCancelBtns = Array.from(btns).filter(b => {
+                            if (b.offsetParent === null || b.disabled) return false;
+                            const t = (b.textContent || '').trim();
+                            return !['取消', '关闭', '×', 'x', 'X'].includes(t);
+                        });
+                        if (nonCancelBtns.length > 0) {
+                            nonCancelBtns[nonCancelBtns.length - 1].click();
+                            return 'fallback_clicked:' + nonCancelBtns[nonCancelBtns.length - 1].textContent.trim();
+                        }
+                    }
+                    return null;
+                });
+                if (handled) {
+                    log('info', 'generic popup handled', { action: handled });
+                    await sleep(2000);
+                }
+            } catch (e) {}
+
+            // === 9. 简化发布提交流程：不断点击当前页面可见的「下一步」或「确认发布」按钮 ===
         // DEBUG: screenshot and dump buttons before submit loop
         try {
             const preSubmit = await page.evaluate(() => ({
@@ -411,6 +447,19 @@ async function doPublish(cookieStr, input) {
         let publishSuccessConfirmed = false;
         const maxSubmitAttempts = 12;
         for (let submitAttempt = 0; submitAttempt < maxSubmitAttempts; submitAttempt++) {
+            log('info', 'submit loop iteration', { attempt: submitAttempt });
+
+            // DEBUG: dump page state
+            try {
+                const state = await page.evaluate(() => ({
+                    url: window.location.href,
+                    bodyText: (document.body.innerText || '').substring(0, 200),
+                    visibleBtns: Array.from(document.querySelectorAll('button')).filter(b => b.offsetParent !== null && !b.disabled).map(b => b.textContent.trim()).filter(t => t.length > 0 && t.length < 25),
+                    modals: Array.from(document.querySelectorAll('[class*="modal"], [class*="dialog"], [class*="popup"]')).filter(m => m.offsetParent !== null).map(m => m.textContent.trim().substring(0, 60)),
+                }));
+                log('info', 'page state', { url: state.url, bodyPreview: state.bodyText, visibleBtns: state.visibleBtns, modalCount: state.modals.length });
+            } catch (e) {}
+
             // Check for success first
             try {
                 const successCheck = await page.evaluate(() => {
@@ -439,8 +488,9 @@ async function doPublish(cookieStr, input) {
                                 const container = el.closest('div[class*="modal"], div[class*="dialog"], div[class*="drawer"]') || document.body;
                                 const btns = container.querySelectorAll('button');
                                 for (const btn of btns) {
+                                    if (btn.offsetParent === null || btn.disabled) continue;
                                     const bt = btn.textContent.trim();
-                                    if (['确认发布', '确认', '确定', '提交', '确定提交'].includes(bt) && btn.offsetParent !== null) {
+                                    if (['确认发布', '确认提交', '确认', '确定', '确定提交', '提交', '发布', '我知道了', '知道了'].some(s => bt.includes(s))) {
                                         btn.click();
                                         return 'clicked:' + bt;
                                     }
@@ -1729,13 +1779,13 @@ async function handlePublishConfirmModal(page) {
                         }
                         if (!matched) continue;
 
-                        // 按优先级点击确认按钮
+                        // 按优先级点击确认按钮（子串匹配）
                         const confirmBtns = ['提交', '确认', '确定', '确认提交', '确认发布', '发布', '知道了', '确定提交', '是'];
                         for (const label of confirmBtns) {
                             const btns = modal.querySelectorAll('button, a[class*="btn"], span[class*="btn"], div[class*="btn"]');
                             for (const btn of btns) {
                                 const t = (btn.textContent || '').trim();
-                                if (t === label) {
+                                if (t.includes(label)) {
                                     btn.click();
                                     return 'clicked:' + label;
                                 }
