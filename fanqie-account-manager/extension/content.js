@@ -29,7 +29,7 @@ window.addEventListener('message', (event) => {
   }
 
   try {
-    chrome.runtime.sendMessage({ type: event.data.type, cookieStr: event.data.cookieStr }, (response) => {
+    chrome.runtime.sendMessage({ type: event.data.type, cookieStr: event.data.cookieStr, platform: event.data.platform }, (response) => {
       if (chrome.runtime.lastError) {
         window.postMessage({
           type: 'FANQIE_CAPTURE_ERROR',
