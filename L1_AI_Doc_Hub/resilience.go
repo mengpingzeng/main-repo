@@ -144,15 +144,19 @@ func isSectionExists(mdContent, period string) bool {
 // buildTemplateData 组装模板数据，对所有动态字段执行 MD 转义
 func (s *Service) buildTemplateData(ctx context.Context, input WriteMDInput) *TemplateData {
 	data := &TemplateData{
-		UID:          input.UID,
-		TaskID:       input.TaskID,
-		Topic:        escapeForMD(input.Topic),
-		CreatedAt:    input.CreatedAt.UTC().Format(time.RFC3339),
-		SkillID:      input.SkillID,
-		SkillName:    input.SkillName,
-		SkillVersion: input.SkillVersion,
-		Model:        input.Model,
-		DraftVersion: input.DraftVersion,
+		UID:           input.UID,
+		TaskID:        input.TaskID,
+		Topic:         escapeForMD(input.Topic),
+		NovelName:     escapeForMD(input.NovelName),
+		VolumeName:    escapeForMD(input.VolumeName),
+		Title:         escapeForMD(input.Title),
+		ChapterNumber: input.ChapterNumber,
+		CreatedAt:     input.CreatedAt.UTC().Format(time.RFC3339),
+		SkillID:       input.SkillID,
+		SkillName:     input.SkillName,
+		SkillVersion:  input.SkillVersion,
+		Model:         input.Model,
+		DraftVersion:  input.DraftVersion,
 	}
 
 	for _, sess := range input.Sessions {

@@ -12,6 +12,10 @@ type WriteMDInput struct {
 	TaskID         string          // 任务 ID，如 task_xxx
 	UID            string          // 用户 ID
 	Topic          string          // 任务主题
+	NovelName      string          // 小说书名
+	VolumeName     string          // 分卷名
+	Title          string          // 章节标题
+	ChapterNumber  int             // 章节号
 	CreatedAt      time.Time       // 任务创建时间（ISO8601 UTC）
 	SkillID        string          // 使用的 Skill ID（如 xhs_grass_v1）
 	SkillName      string          // 使用的 Skill 名称
@@ -110,6 +114,10 @@ type StatsRepository interface {
 type TemplateData struct {
 	UID           string
 	Topic         string
+	NovelName     string
+	VolumeName    string
+	Title         string
+	ChapterNumber int
 	TaskID         string
 	CreatedAt      string // ISO8601 UTC 格式化后的字符串
 	SkillID        string

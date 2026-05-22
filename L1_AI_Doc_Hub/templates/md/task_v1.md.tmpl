@@ -1,14 +1,18 @@
-# {{.Topic}}
+# {{if .NovelName}}{{.NovelName}}{{else}}{{.Topic}}{{end}}
 
 ## 任务信息
 | 字段 | 值 |
 |---|---|
 | Task ID | {{.TaskID}} |
 | 用户 ID | {{.UID}} |
+| 小说名 | {{.NovelName}} |
+| 分卷 | {{.VolumeName}} |
+| 章节标题 | {{.Title}} |
+| 章节序号 | 第{{.ChapterNumber}}章 |
 | 创建时间 | {{.CreatedAt}} |
-| 使用 Skill | {{.SkillName}} (ID: {{.SkillID}}, v{{.SkillVersion}}) |
-| 使用 Model | {{.Model}} |
-| 最终 Draft 版本 | v{{.DraftVersion}} |
+| 使用 Skill | {{if .SkillName}}{{.SkillName}}{{else}}-{{end}} (ID: {{if .SkillID}}{{.SkillID}}{{else}}-{{end}}) |
+| 使用 Model | {{if .Model}}{{.Model}}{{else}}-{{end}} |
+| Draft 版本 | v{{.DraftVersion}} |
 
 ## 会话历程
 {{range $i, $s := .Sessions}}
@@ -23,31 +27,6 @@
 - 用户核心诉求：{{.UserIntent}}
 - Agent 关键决定：{{.Decisions}}
 {{end}}
-{{end}}
-{{end}}
-
-## 最终产物
-### 小红书文案
-{{.Products.XhsText}}
-
-### 公众号长文
-{{.Products.WechatHTML}}
-
-{{if .Products.FanqieNovel}}
-### 番茄小说
-{{.Products.FanqieNovel}}
-{{end}}
-
-{{if .Products.ZhulangNovel}}
-### 逐浪网
-{{.Products.ZhulangNovel}}
-{{end}}
-
-{{if .Products.Others}}
-### 其他平台
-{{range $platform, $content := .Products.Others}}
-#### {{$platform}}
-{{$content}}
 {{end}}
 {{end}}
 
