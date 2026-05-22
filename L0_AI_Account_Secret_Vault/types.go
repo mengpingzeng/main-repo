@@ -29,6 +29,7 @@ type AdminUserInfo struct {
 	AccountCount int    `json:"accountCount"`
 	TaskCount    int    `json:"taskCount"`
 	CreatedAt    string `json:"createdAt"`
+	LastLoginAt  string `json:"lastLoginAt,omitempty"`
 }
 
 // AdminUserListResponse 用户列表响应。

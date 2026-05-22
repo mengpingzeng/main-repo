@@ -115,6 +115,13 @@ func (s *UserStore) Authenticate(ctx context.Context, username, password string)
 	if !s.checkPassword(user.Password, password) {
 		return nil, ErrInvalidCredentials
 	}
+	// 异步更新登录时间，用独立 context 避免请求结束后 ctx 被取消
+	go func() {
+		_, _ = s.db.ExecContext(context.Background(),
+			`UPDATE a1_users SET last_login_at = NOW() WHERE uid = ?`,
+			user.UID,
+		)
+	}()
 	return user, nil
 }
 
@@ -122,7 +129,8 @@ func (s *UserStore) ListUsers(ctx context.Context) ([]AdminUserInfo, error) {
 	query := `
 		SELECT u.uid, u.username, u.role, u.created_at,
 		       COALESCE(c.account_count, 0) AS account_count,
-		       COALESCE(t.task_count, 0) AS task_count
+		       COALESCE(t.task_count, 0) AS task_count,
+		       u.last_login_at
 		FROM a1_users u
 		LEFT JOIN (
 			SELECT uid, COUNT(*) AS account_count
@@ -147,10 +155,14 @@ func (s *UserStore) ListUsers(ctx context.Context) ([]AdminUserInfo, error) {
 	for rows.Next() {
 		var u AdminUserInfo
 		var createdAt time.Time
-		if err := rows.Scan(&u.UID, &u.Username, &u.Role, &createdAt, &u.AccountCount, &u.TaskCount); err != nil {
+		var lastLoginAt sql.NullTime
+		if err := rows.Scan(&u.UID, &u.Username, &u.Role, &createdAt, &u.AccountCount, &u.TaskCount, &lastLoginAt); err != nil {
 			return nil, fmt.Errorf("scan user: %w", err)
 		}
 		u.CreatedAt = createdAt.Format(time.RFC3339)
+		if lastLoginAt.Valid {
+			u.LastLoginAt = lastLoginAt.Time.Format(time.RFC3339)
+		}
 		users = append(users, u)
 	}
 	return users, rows.Err()

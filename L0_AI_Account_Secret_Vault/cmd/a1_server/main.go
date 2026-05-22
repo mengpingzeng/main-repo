@@ -487,7 +487,10 @@ func (s *server) handleCookieHealth(w http.ResponseWriter, r *http.Request) {
 
 	uid := ""
 	if claims := vault.GetAuthClaims(r.Context()); claims != nil {
-		uid = claims.UID
+		// admin 角色可检测任意账号，传空 UID 跳过归属校验
+		if claims.Role != "admin" {
+			uid = claims.UID
+		}
 	}
 
 	resp, err := s.vault.CheckCookieHealth(r.Context(), vault.CheckCookieHealthRequest{
@@ -510,7 +513,10 @@ func (s *server) handleGetCredentialForOwner(w http.ResponseWriter, r *http.Requ
 
 	uid := ""
 	if claims := vault.GetAuthClaims(r.Context()); claims != nil {
-		uid = claims.UID
+		// admin 角色可操作任意账号，传空 UID 跳过归属校验
+		if claims.Role != "admin" {
+			uid = claims.UID
+		}
 	}
 
 	resp, err := s.vault.GetCredentialForOwner(r.Context(), accountID, uid)

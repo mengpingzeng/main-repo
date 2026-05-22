@@ -130,6 +130,37 @@ func (s *CredentialStore) FindByUIDWithCiphertext(ctx context.Context, uid strin
 	return cred, nil
 }
 
+// FindByDisplayName 查询同平台下是否已有相同账号名（全局范围，跨用户）。
+// 用于绑定前的唯一性校验。excludeAccountID 不为空时排除自身（用于更新场景）。
+func (s *CredentialStore) FindByDisplayName(ctx context.Context, platform, maskedDisplay, excludeAccountID string) (*AccountCredential, error) {
+	query := `
+		SELECT account_id, uid, platform, masked_display, created_at, updated_at
+		FROM a1_credentials
+		WHERE platform = ?
+		  AND masked_display = ?
+		  AND credential IS NOT NULL AND credential != ''
+	`
+	args := []interface{}{platform, maskedDisplay}
+	if excludeAccountID != "" {
+		query += " AND account_id != ?"
+		args = append(args, excludeAccountID)
+	}
+	query += " LIMIT 1"
+
+	cred := &AccountCredential{}
+	err := s.db.QueryRowContext(ctx, query, args...).Scan(
+		&cred.AccountID, &cred.UID, &cred.Platform,
+		&cred.MaskedDisplay, &cred.CreatedAt, &cred.UpdatedAt,
+	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("query credential by display name: %w", err)
+	}
+	return cred, nil
+}
+
 // SoftDelete 软删除凭证（清空 credential）。
 func (s *CredentialStore) SoftDelete(ctx context.Context, accountID string) error {
 	query := `

@@ -31,6 +31,15 @@ func (v *RealSecretVault) Bind(ctx context.Context, req BindRequest) (*BindRespo
 		maskedDisplay = generateMaskedDisplay(req.Platform, req.CredentialsPlaintext)
 	}
 
+	// 同平台账号名全局唯一校验（更新自身时排除自己）
+	conflict, err := v.store.FindByDisplayName(ctx, req.Platform, maskedDisplay, accountID)
+	if err != nil {
+		return nil, fmt.Errorf("check display name uniqueness: %w", err)
+	}
+	if conflict != nil {
+		return nil, ErrDuplicateDisplayName
+	}
+
 	encryptResult, err := v.encryptor.Encrypt(ctx, []byte(req.CredentialsPlaintext))
 	if err != nil {
 		v.audit.Record(ctx, AuditEntry{

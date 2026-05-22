@@ -12,9 +12,11 @@ import (
 )
 
 // fanqieCheckURL 用于检测登录态的番茄小说轻量接口。
-// 该接口只需 Cookie 即可调用，不强制要求 msToken / a_bogus 等动态防爬参数。
-// 返回 JSON：{"code":0,...} 表示已登录；{"code":-2012,...} 或 code!=0 表示未登录。
 const fanqieCheckURL = "https://fanqienovel.com/api/author/account/info/v0/?aid=2503&app_name=muye_novel"
+
+// zhulangCheckURL 用于检测逐浪网登录态的接口。
+// 不带 callback 参数时返回纯 JSON：{"total":"0","code":1}（已登录）或 code!=1（未登录）。
+const zhulangCheckURL = "https://www.zhulang.com/ajax/Msg/getUnreadNum.html"
 
 // fanqieProbeTimeout 单次探测超时。
 const fanqieProbeTimeout = 8 * time.Second
@@ -112,6 +114,80 @@ func parseCookieField(cookieStr, name string) string {
 	return ""
 }
 
+// probeZhulangLogin 向逐浪网发送带 Cookie 的请求，判断登录态是否有效。
+//
+// 接口：GET https://www.zhulang.com/ajax/Msg/getUnreadNum.html
+// 已登录时返回 JSON {"total":"...","code":1}；未登录时 code!=1。
+// 响应可能是纯 JSON 或 JSONP 包装，两种格式均支持解析。
+func probeZhulangLogin(ctx context.Context, cookieStr string) (valid bool, err error) {
+	reqCtx, cancel := context.WithTimeout(ctx, fanqieProbeTimeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, zhulangCheckURL, nil)
+	if err != nil {
+		return false, fmt.Errorf("build request: %w", err)
+	}
+
+	req.Header.Set("Cookie", cookieStr)
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+	req.Header.Set("Referer", "https://www.zhulang.com/")
+	req.Header.Set("Accept", "application/json, text/plain, */*")
+
+	client := &http.Client{
+		Timeout: fanqieProbeTimeout,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		// 网络不通时降级：有 PHPSESSID 就保守判为有效
+		if parseCookieField(cookieStr, "PHPSESSID") != "" {
+			return true, nil
+		}
+		return false, fmt.Errorf("probe request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 300 || resp.StatusCode != http.StatusOK {
+		return false, nil
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	if err != nil {
+		return false, fmt.Errorf("read response: %w", err)
+	}
+
+	// 尝试直接解析 JSON
+	bodyStr := strings.TrimSpace(string(body))
+	var result struct {
+		Code interface{} `json:"code"`
+	}
+
+	// 如果是 JSONP 格式（jQuery...(...)）则提取括号内的 JSON
+	jsonStr := bodyStr
+	if idx := strings.IndexByte(bodyStr, '('); idx != -1 {
+		end := strings.LastIndexByte(bodyStr, ')')
+		if end > idx {
+			jsonStr = bodyStr[idx+1 : end]
+		}
+	}
+
+	if err := json.Unmarshal([]byte(jsonStr), &result); err != nil {
+		return false, nil
+	}
+
+	// code == 1 表示已登录
+	switch v := result.Code.(type) {
+	case float64:
+		return v == 1, nil
+	case string:
+		return v == "1", nil
+	}
+	return false, nil
+}
+
 // checkPlatformCookieExpiry 按平台分发到对应的检测函数。
 //
 // 返回：
@@ -123,8 +199,16 @@ func checkPlatformCookieExpiry(ctx context.Context, platform, cookieStr string) 
 	case "fanqie":
 		valid, err = probeFanqieLogin(ctx, cookieStr)
 		if err != nil {
-			// 网络不通时降级：有 sessionid 字段就保守判为有效，避免误报过期
 			if parseCookieField(cookieStr, "sessionid") != "" {
+				return true, nil
+			}
+			return false, ErrPlatformNotSupported
+		}
+		return valid, nil
+	case "zhulang":
+		valid, err = probeZhulangLogin(ctx, cookieStr)
+		if err != nil {
+			if parseCookieField(cookieStr, "PHPSESSID") != "" {
 				return true, nil
 			}
 			return false, ErrPlatformNotSupported

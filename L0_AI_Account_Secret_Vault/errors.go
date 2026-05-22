@@ -148,6 +148,14 @@ var (
 		HTTPStatus: http.StatusUnprocessableEntity,
 		Retryable:  false,
 	}
+
+	// ErrDuplicateDisplayName 同平台下账号名已被占用（全局唯一约束）。
+	ErrDuplicateDisplayName = &SecretError{
+		Code:       "DUPLICATE_DISPLAY_NAME",
+		Message:    "该平台下此账号名已被绑定，请使用其他账号",
+		HTTPStatus: http.StatusConflict,
+		Retryable:  false,
+	}
 )
 
 // WrapError 包装底层错误，保留错误码。
