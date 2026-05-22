@@ -90,6 +90,7 @@ export interface TaskSummary {
   model: string
   uid?: string
   created_at: string
+  last_active_at?: string
   status: string
   draft_version: number
   active_session_id?: string
@@ -127,6 +128,7 @@ export interface SessionCreateInput {
   topic?: string
   platform?: string
   accountId?: string
+  novel_name?: string
 }
 
 export interface SessionCreateResponse {
@@ -250,6 +252,7 @@ export interface AdminUserInfo {
   accountCount: number
   taskCount: number
   createdAt: string
+  lastLoginAt?: string
 }
 
 export interface AdminUserListResponse {

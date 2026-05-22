@@ -19,10 +19,10 @@ export function Select({ value, onValueChange, placeholder, className, disabled,
     <SelectPrimitive.Root value={value} onValueChange={onValueChange} disabled={disabled}>
       <SelectPrimitive.Trigger
         className={cn(
-          "flex h-9 w-full items-center justify-between rounded-lg border border-input bg-background px-3 py-1 text-sm",
+          "flex w-full items-center justify-between rounded-lg border border-input bg-background px-3 py-2.5 text-sm",
           "transition-colors",
-          "placeholder:text-[#86909c]",
-          "focus-visible:outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-[rgba(99,91,255,0.15)]",
+          "placeholder:text-slate-400",
+          "focus-visible:outline-none focus-visible:border-orange-400 focus-visible:ring-2 focus-visible:ring-orange-500/15",
           "disabled:cursor-not-allowed disabled:opacity-50",
           "cursor-pointer group",
           className
@@ -63,8 +63,8 @@ export function SelectItem({ value, children }: SelectItemProps) {
       value={value}
       className={cn(
         "relative flex items-center px-3 py-2 text-sm cursor-pointer outline-none",
-        "hover:bg-[#f7f8fa] focus:bg-[#f7f8fa]",
-        "data-[state=checked]:bg-[#f0f1ff] data-[state=checked]:font-medium data-[state=checked]:text-[#1d2129]"
+        "hover:bg-slate-50 focus:bg-slate-50",
+        "data-[state=checked]:bg-orange-50 data-[state=checked]:font-medium data-[state=checked]:text-orange-700"
       )}
     >
       <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>

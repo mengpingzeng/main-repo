@@ -208,6 +208,23 @@ export async function deleteUser(uid: string): Promise<{ deleted: boolean }> {
   return del<{ deleted: boolean }>(`/api/admin/users/${uid}`)
 }
 
+export async function updateTask(taskId: string, body: { novel_name?: string }): Promise<void> {
+  await post<unknown>(`/api/task/${taskId}/update`, body)
+}
+
+export async function deleteTask(taskId: string): Promise<void> {
+  await del<unknown>(`/api/task/${taskId}`)
+}
+
+export async function fetchTaskSessions(taskId: string): Promise<{ sessions: Array<{ session_id: string; created_at: string; draft_version: number; status: string }> }> {
+  return get(`/api/task/${taskId}/sessions`)
+}
+
+export async function generateNovelTitle(topic: string): Promise<{ titles: string[]; content: string }> {
+  const resp = await post<{ code: number; data: { titles: string[]; content: string } }>("/api/novel/title-suggest", { topic })
+  return resp.data
+}
+
 async function put<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     method: "PUT",

@@ -17,9 +17,9 @@ import {
   type CookieHealthStatus,
 } from "@/lib/cookie-health-cache"
 import type { AccountSummary } from "@/types"
-import { formatDate } from "@/lib/utils"
+import { formatDate, formatRelativeTime } from "@/lib/utils"
 import {
-  Shield, Plus, Loader2, CheckCircle, AlertCircle, Wand2, XCircle, HelpCircle, RefreshCw, ExternalLink,
+  Shield, Plus, Loader2, CheckCircle, AlertCircle, RefreshCw, ExternalLink, LogIn,
 } from "lucide-react"
 
 const PLATFORM_LABELS: Record<string, string> = {
@@ -30,10 +30,18 @@ const PLATFORM_LABELS: Record<string, string> = {
   zhulang: "逐浪网",
 }
 
-// 扩展消息类型
-type CaptureStatus = 'idle' | 'running' | 'done' | 'error'
+const PLATFORM_ORDER = ["fanqie", "zhulang", "xhs", "wechat", "yuewen"]
 
-/** UI 展示状态：checking 是前端独有的"进行中"状态，其余来自缓存 */
+/** 各平台卡片图标配色 */
+const PLATFORM_ICON: Record<string, { bg: string; text: string; char: string }> = {
+  fanqie: { bg: "bg-red-50",    text: "text-red-500",    char: "番" },
+  zhulang: { bg: "bg-blue-50",  text: "text-blue-500",   char: "逐" },
+  xhs:     { bg: "bg-rose-100", text: "text-rose-600",   char: "红" },
+  wechat:  { bg: "bg-green-50", text: "text-green-600",  char: "微" },
+  yuewen:  { bg: "bg-purple-50",text: "text-purple-500", char: "阅" },
+}
+
+type CaptureStatus = 'idle' | 'running' | 'done' | 'error'
 type DisplayStatus = CookieHealthStatus | 'checking'
 
 export default function AccountsPage() {
@@ -51,24 +59,15 @@ export default function AccountsPage() {
   const [reLoginTarget, setReLoginTarget] = useState<AccountSummary | null>(null)
   const [reLoginCredentials, setReLoginCredentials] = useState("")
   const [reLoginBinding, setReLoginBinding] = useState(false)
-  // 注入状态：account_id → 'injecting' | 'done' | 'error'
+  const [bindDialogError, setBindDialogError] = useState<string | null>(null)
+  const [reLoginDialogError, setReLoginDialogError] = useState<string | null>(null)
   const [injectStatusMap, setInjectStatusMap] = useState<Record<string, 'injecting' | 'done' | 'error'>>({})
-  const [page, setPageState] = useState(1)
 
-  // Cookie 健康状态 map：account_id → DisplayStatus
   const [cookieStatusMap, setCookieStatusMap] = useState<Record<string, DisplayStatus>>({})
-  // 自动获取 Cookie 相关状态
   const [captureStatus, setCaptureStatus] = useState<CaptureStatus>('idle')
   const [captureMessage, setCaptureMessage] = useState("")
-  // 区分自动抓取结果回填到哪个弹窗（用 ref 避免 stale closure）
   const captureContextRef = useRef<'bind' | 'relogin'>('bind')
   const captureTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  const setPage = (p: number) => {
-    setPageState(p)
-    window.scrollTo({ top: 0, behavior: "smooth" })
-  }
-  const pageSize = 5
 
   const loadAccounts = useCallback(async () => {
     setLoading(true)
@@ -84,51 +83,27 @@ export default function AccountsPage() {
     }
   }, [])
 
-  /**
-   * 初始化 Cookie 状态显示策略（缓存优先 + 乐观估算 + 按需检测）
-   *
-   * 逻辑：
-   *  1. 先从 localStorage 批量读取缓存，有效缓存直接上屏，避免页面闪烁"检测中"
-   *  2. 无缓存的账号 → 用 updated_at 做乐观估算立即显示，同时后台触发真实检测
-   *  3. 有缓存但已过期（> 1h）→ 保留旧状态先显示，后台静默刷新，结果返回后覆盖
-   *  4. 有缓存且新鲜 → 直接用缓存，不发任何请求
-   */
   const initCookieStatus = useCallback((accs: AccountSummary[]) => {
     if (accs.length === 0) return
-
     const cached = getBulkCached(accs.map(a => a.account_id))
     const initial: Record<string, DisplayStatus> = {}
     const needsCheck: AccountSummary[] = []
-
     for (const acc of accs) {
       const entry = cached[acc.account_id]
-
       if (entry && !isCacheStale(entry)) {
-        // 缓存新鲜：直接用，不发请求
         initial[acc.account_id] = entry.status
       } else if (entry && isCacheStale(entry)) {
-        // 缓存过期：先用旧值展示，排入后台刷新队列
         initial[acc.account_id] = entry.status
         needsCheck.push(acc)
       } else {
-        // 无缓存：用 updated_at 乐观估算作为初始值，排入检测队列
         initial[acc.account_id] = heuristicStatus(acc.updated_at)
         needsCheck.push(acc)
       }
     }
-
     setCookieStatusMap(initial)
-
-    if (needsCheck.length > 0) {
-      runHealthChecks(needsCheck)
-    }
+    if (needsCheck.length > 0) runHealthChecks(needsCheck)
   }, [])
 
-  /**
-   * 对需要检测的账号并行发起后端探测。
-   * 使用 Promise.allSettled 保证单个失败不影响其他。
-   * 结果写入 localStorage 缓存并更新 UI 状态。
-   */
   const runHealthChecks = useCallback(async (accs: AccountSummary[], markChecking = false) => {
     if (markChecking) {
       setCookieStatusMap(prev => {
@@ -137,28 +112,20 @@ export default function AccountsPage() {
         return next
       })
     }
-
-    const results = await Promise.allSettled(
-      accs.map(acc => checkCookieHealth(acc.account_id))
-    )
-
+    const results = await Promise.allSettled(accs.map(acc => checkCookieHealth(acc.account_id)))
     setCookieStatusMap(prev => {
       const next = { ...prev }
       results.forEach((result, i) => {
         const id = accs[i].account_id
         const status: CookieHealthStatus =
-          result.status === 'fulfilled'
-            ? (result.value.valid ? 'valid' : 'expired')
-            : 'unknown'
+          result.status === 'fulfilled' ? (result.value.valid ? 'valid' : 'expired') : 'unknown'
         next[id] = status
-        // 写入 localStorage 缓存
         setCachedEntry(id, { status, checkedAt: Date.now(), source: 'backend' })
       })
       return next
     })
   }, [])
 
-  /** 手动刷新单个账号的 Cookie 状态（强制跳过缓存） */
   const recheckOne = useCallback(async (accountId: string) => {
     setCookieStatusMap(prev => ({ ...prev, [accountId]: 'checking' }))
     try {
@@ -173,33 +140,24 @@ export default function AccountsPage() {
   }, [])
 
   useEffect(() => { loadAccounts() }, [loadAccounts])
-  useEffect(() => { setPage(1) }, [accountFilter])
 
-  // 监听扩展通过 content.js 回传的消息
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
       if (event.source !== window) return
       if (!event.data || typeof event.data !== 'object') return
-
       const { type, status, message: msg, cookieStr, username, cookieCount } = event.data
-
-      // 收到任何回应，清除「未检测到扩展」的超时计时器
       if (captureTimeoutRef.current) {
         clearTimeout(captureTimeoutRef.current)
         captureTimeoutRef.current = null
       }
-
       switch (type) {
         case 'FANQIE_CAPTURE_STATUS':
           setCaptureStatus(status === 'busy' ? 'error' : 'running')
           setCaptureMessage(msg || '')
           break
-
         case 'FANQIE_CAPTURE_RESULT':
           setCaptureStatus('done')
-          setCaptureMessage(
-            `已获取 ${cookieCount} 条 Cookie${username ? `，账号：${username}` : '，请填写显示名'}`
-          )
+          setCaptureMessage(`已获取 ${cookieCount} 条 Cookie${username ? `，账号：${username}` : '，请填写显示名'}`)
           if (captureContextRef.current === 'relogin') {
             setReLoginCredentials(cookieStr || '')
           } else {
@@ -207,17 +165,11 @@ export default function AccountsPage() {
             if (username) setDisplayName(username)
           }
           break
-
         case 'FANQIE_CAPTURE_ERROR':
           setCaptureStatus('error')
           setCaptureMessage(msg || '抓取失败，请重试')
           break
-
-        case 'FANQIE_INJECT_STATUS':
-          // 注入进度消息，暂时只更新提示（通过 injectStatusMap 跟踪按钮状态）
-          break
         case 'FANQIE_INJECT_DONE':
-          // 注入完成，清除所有 injecting 状态
           setInjectStatusMap({})
           break
         case 'FANQIE_INJECT_ERROR':
@@ -226,128 +178,64 @@ export default function AccountsPage() {
           break
       }
     }
-
     window.addEventListener('message', handleMessage)
     return () => window.removeEventListener('message', handleMessage)
   }, [])
 
-  // 弹窗关闭 / 平台切换时重置抓取状态
   useEffect(() => {
-    if (!showBindModal) resetCaptureState()
-  }, [showBindModal])
-
-  useEffect(() => {
-    if (!reLoginTarget) {
-      setReLoginCredentials("")
+    if (!showBindModal) {
       resetCaptureState()
+      setPlatform("fanqie")
+      setCredentials("")
+      setDisplayName("")
+      setBindDialogError(null)
     }
-  }, [reLoginTarget])
-
-  useEffect(() => {
-    resetCaptureState()
-  }, [platform])
+  }, [showBindModal])
+  useEffect(() => { if (!reLoginTarget) { setReLoginCredentials(""); resetCaptureState() } }, [reLoginTarget])
+  useEffect(() => { resetCaptureState() }, [platform])
 
   function resetCaptureState() {
     setCaptureStatus('idle')
     setCaptureMessage('')
-    if (captureTimeoutRef.current) {
-      clearTimeout(captureTimeoutRef.current)
-      captureTimeoutRef.current = null
-    }
+    if (captureTimeoutRef.current) { clearTimeout(captureTimeoutRef.current); captureTimeoutRef.current = null }
   }
 
-  // 点击「自动获取 Cookie」
   const handleAutoCapture = (context: 'bind' | 'relogin' = 'bind') => {
     captureContextRef.current = context
     setCaptureStatus('running')
     setCaptureMessage('正在连接扩展...')
-
-    // 5 秒内没有收到扩展任何响应，提示安装扩展
     captureTimeoutRef.current = setTimeout(() => {
       setCaptureStatus('error')
       setCaptureMessage('未检测到「番茄账号管家」扩展，请安装并启用后重试')
     }, 5000)
-
-    window.postMessage({ type: 'FANQIE_CAPTURE_START' }, '*')
-  }
-
-  const filteredAccounts = accountFilter ? accounts.filter((a) => a.platform === accountFilter) : accounts
-  const total = filteredAccounts.length
-  const totalPages = Math.max(1, Math.ceil(total / pageSize))
-  const pagedAccounts = filteredAccounts.slice((page - 1) * pageSize, page * pageSize)
-
-  /** 渲染 Cookie 状态徽标 */
-  function CookieStatusBadge({ accountId }: { accountId: string }) {
-    const status = cookieStatusMap[accountId]
-    const entry = getCachedEntry(accountId)
-    const checkedText = entry
-      ? `上次检测：${formatDate(new Date(entry.checkedAt).toISOString())}${entry.source === 'heuristic' ? '（估算）' : ''}`
-      : ''
-
-    const badge = (() => {
-      if (status === 'checking') {
-        return (
-          <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-            <Loader2 size={11} className="animate-spin" /> 检测中
-          </span>
-        )
-      }
-      if (status === 'valid') {
-        return (
-          <span className="inline-flex items-center gap-1 text-xs font-medium text-[#22c55e]">
-            <CheckCircle size={11} /> 正常
-          </span>
-        )
-      }
-      if (status === 'expired') {
-        return (
-          <span className="inline-flex items-center gap-1 text-xs font-medium text-destructive">
-            <XCircle size={11} /> 已过期
-          </span>
-        )
-      }
-      return (
-        <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-          <HelpCircle size={11} /> 未知
-        </span>
-      )
-    })()
-
-    return (
-      <span title={checkedText || undefined}>
-        {badge}
-      </span>
-    )
+    window.postMessage({ type: 'FANQIE_CAPTURE_START', platform }, '*')
   }
 
   const handleBind = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!credentials.trim()) return
     setBinding(true)
-    setMessage(null)
+    setBindDialogError(null)
     try {
       const resp = await bindAccount(platform, credentials.trim(), displayName.trim() || undefined)
-      setMessage({ type: "success", text: resp.is_new_binding ? "绑定成功" : "凭证已更新" })
-      // 凭证变更，旧的状态缓存不再有效
       invalidateCache(resp.account_id)
       setCredentials("")
       setDisplayName("")
       setShowBindModal(false)
+      setMessage({ type: "success", text: resp.is_new_binding ? "绑定成功" : "凭证已更新" })
       loadAccounts()
     } catch (err) {
-      setMessage({ type: "error", text: err instanceof Error ? err.message : "绑定失败" })
+      setBindDialogError(err instanceof Error ? err.message : "绑定失败")
     } finally {
       setBinding(false)
     }
   }
 
-  /** 从 Vault 取出 Cookie 并通过扩展注入浏览器，打开番茄写作者中心 */
   const handleOpenFanqie = async (acc: AccountSummary) => {
     setInjectStatusMap(prev => ({ ...prev, [acc.account_id]: 'injecting' }))
     try {
       const resp = await fetchAccountCredential(acc.account_id)
-      window.postMessage({ type: 'FANQIE_INJECT_COOKIES', cookieStr: resp.credentials }, '*')
-      // 10 秒超时兜底：若扩展未回传 DONE/ERROR，自动清除加载状态
+      window.postMessage({ type: 'FANQIE_INJECT_COOKIES', cookieStr: resp.credentials, platform: acc.platform }, '*')
       setTimeout(() => {
         setInjectStatusMap(prev => {
           if (prev[acc.account_id] === 'injecting') {
@@ -361,32 +249,30 @@ export default function AccountsPage() {
     } catch (err) {
       setInjectStatusMap(prev => ({ ...prev, [acc.account_id]: 'error' }))
       setMessage({ type: 'error', text: err instanceof Error ? err.message : '获取凭证失败，请重试' })
-      setTimeout(() => setInjectStatusMap(prev => {
-        const next = { ...prev }
-        delete next[acc.account_id]
-        return next
-      }), 3000)
+      setTimeout(() => setInjectStatusMap(prev => { const next = { ...prev }; delete next[acc.account_id]; return next }), 3000)
     }
   }
 
-  const handleReLogin = async (e: React.FormEvent) => {    e.preventDefault()
+  const handleReLogin = async (e: React.FormEvent) => {
+    e.preventDefault()
     if (!reLoginTarget || !reLoginCredentials.trim()) return
     setReLoginBinding(true)
-    setMessage(null)
+    setReLoginDialogError(null)
     try {
       const resp = await bindAccount(reLoginTarget.platform, reLoginCredentials.trim(), reLoginTarget.masked_display, reLoginTarget.account_id)
       invalidateCache(resp.account_id)
-      setMessage({ type: "success", text: "Cookie 已更新，登录状态已恢复" })
       setReLoginTarget(null)
+      setMessage({ type: "success", text: "Cookie 已更新，登录状态已恢复" })
       loadAccounts()
     } catch (err) {
-      setMessage({ type: "error", text: err instanceof Error ? err.message : "更新失败，请重试" })
+      setReLoginDialogError(err instanceof Error ? err.message : "更新失败，请重试")
     } finally {
       setReLoginBinding(false)
     }
   }
 
-  const handleUnbind = async (accountId: string) => {    try {
+  const handleUnbind = async (accountId: string) => {
+    try {
       await unbindAccount(accountId)
       invalidateCache(accountId)
       setMessage({ type: "success", text: "已解绑" })
@@ -396,330 +282,501 @@ export default function AccountsPage() {
     }
   }
 
+  const filteredAccounts = accountFilter ? accounts.filter(a => a.platform === accountFilter) : accounts
+
+  // 按平台分组
+  const grouped = PLATFORM_ORDER.reduce<Record<string, AccountSummary[]>>((acc, p) => {
+    const list = filteredAccounts.filter(a => a.platform === p)
+    if (list.length > 0) acc[p] = list
+    return acc
+  }, {})
+  // 有账号但平台不在预设列表中的也收录
+  filteredAccounts.forEach(a => {
+    if (!PLATFORM_ORDER.includes(a.platform) && !grouped[a.platform]) {
+      grouped[a.platform] = filteredAccounts.filter(x => x.platform === a.platform)
+    }
+  })
+
+  /** Cookie 状态徽标 */
+  function StatusBadge({ accountId }: { accountId: string }) {
+    const status = cookieStatusMap[accountId]
+    const entry = getCachedEntry(accountId)
+    const title = entry
+      ? `上次检测：${formatDate(new Date(entry.checkedAt).toISOString())}${entry.source === 'heuristic' ? '（估算）' : ''}`
+      : ''
+
+    if (status === 'checking') {
+      return (
+        <span className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-slate-500 bg-slate-50 border border-slate-200 rounded-md" title={title}>
+          <Loader2 size={10} className="animate-spin" /> 检测中
+        </span>
+      )
+    }
+    if (status === 'valid') {
+      return (
+        <span className="inline-flex items-center px-2.5 py-1 text-xs font-medium text-emerald-600 bg-emerald-50 border border-emerald-100 rounded-md" title={title}>
+          状态: 有效
+        </span>
+      )
+    }
+    if (status === 'expired') {
+      return (
+        <span className="inline-flex items-center px-2.5 py-1 text-xs font-medium text-rose-600 bg-rose-50 border border-rose-200 rounded-md" title={title}>
+          状态: 失效
+        </span>
+      )
+    }
+    return (
+      <span className="inline-flex items-center px-2.5 py-1 text-xs font-medium text-slate-400 bg-slate-50 border border-slate-200 rounded-md" title={title}>
+        状态: 未知
+      </span>
+    )
+  }
+
   return (
-    <div className="w-full max-w-[1080px]">
-      <div className="flex items-center justify-between mb-5">
-        <h1 className="text-lg font-semibold text-foreground">账号配置</h1>
-        <Button size="lg" onClick={() => setShowBindModal(true)}>
-          <Plus size={16} /> 绑定账号
-        </Button>
+    <div className="max-w-7xl mx-auto px-6 pt-6">
+      {/* ── 页面头部 ── */}
+      <div className="flex justify-between items-end mb-8">
+        <div>
+          <h1 className="text-3xl font-bold text-slate-900 tracking-tight">发布账号配置</h1>
+          <p className="text-slate-500 mt-1 text-sm">管理各平台用于分发的账号，通过 KMS 安全保管</p>
+        </div>
+        <button
+          onClick={() => setShowBindModal(true)}
+          className="px-4 py-2 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-800 transition-colors shadow-sm flex items-center gap-1.5"
+        >
+          <Plus size={15} />
+          绑定新账号
+        </button>
       </div>
 
-      <div className="flex items-center gap-3 mb-4">
-        <SelectRadix value={accountFilter || "all"} onValueChange={(v) => setAccountFilter(v === "all" ? "" : v)} className="w-[160px]">
-          <SelectItem value="all">全部平台</SelectItem>
-          <SelectItem value="fanqie">番茄小说</SelectItem>
-          <SelectItem value="xhs">小红书</SelectItem>
-          <SelectItem value="wechat">微信公众号</SelectItem>
-          <SelectItem value="yuewen">阅文</SelectItem>
-          <SelectItem value="zhulang">逐浪网</SelectItem>
-        </SelectRadix>
-      </div>
-
+      {/* ── 全局消息条 ── */}
       {message && (
-        <div className={`mb-4 p-3 rounded-lg text-sm flex items-center gap-2 ${
+        <div className={`mb-6 p-3 rounded-lg text-sm flex items-center gap-2 ${
           message.type === "success"
-            ? "bg-[#22c55e]/8 border border-[#22c55e]/20 text-[#22c55e]"
-            : "bg-destructive/8 border border-destructive/20 text-destructive"
+            ? "bg-emerald-50 border border-emerald-100 text-emerald-700"
+            : "bg-red-50 border border-red-100 text-red-600"
         }`}>
           {message.type === "success" ? <CheckCircle size={14} /> : <AlertCircle size={14} />}
           {message.text}
         </div>
       )}
 
+      {/* ── 平台过滤 Tab ── */}
+      <div className="flex items-center gap-1 mb-6 bg-slate-100 rounded-lg p-1 w-fit">
+        {[
+          { value: "",        label: "全部平台" },
+          { value: "fanqie",  label: "番茄小说" },
+          { value: "zhulang", label: "逐浪网"   },
+        ].map(tab => (
+          <button
+            key={tab.value}
+            onClick={() => setAccountFilter(tab.value)}
+            className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all ${
+              accountFilter === tab.value
+                ? "bg-white text-slate-900 shadow-sm"
+                : "text-slate-500 hover:text-slate-700"
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {/* ── 内容区 ── */}
+      {loading ? (
+        <div className="flex items-center justify-center py-24">
+          <Loader2 className="w-7 h-7 animate-spin text-orange-500" />
+        </div>
+      ) : error ? (
+        <div className="flex flex-col items-center justify-center py-24">
+          <AlertCircle className="w-12 h-12 mb-4 text-red-300" />
+          <p className="text-sm text-slate-500 mb-3">{error}</p>
+          <button onClick={loadAccounts} className="text-sm text-orange-600 hover:underline">重试</button>
+        </div>
+      ) : accounts.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-24">
+          <div className="w-20 h-20 mb-5 rounded-2xl border border-slate-200 bg-slate-50 flex items-center justify-center">
+            <Shield className="w-9 h-9 text-slate-300" />
+          </div>
+          <p className="text-base font-medium text-slate-400">还没有绑定的账号</p>
+          <p className="text-sm text-slate-300 mt-1 mb-6">绑定后可在任务中选择对应平台账号分发内容</p>
+          <button
+            onClick={() => setShowBindModal(true)}
+            className="px-4 py-2 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-800 transition-colors flex items-center gap-1.5"
+          >
+            <Plus size={15} /> 绑定新账号
+          </button>
+        </div>
+      ) : filteredAccounts.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-24">
+          <p className="text-sm text-slate-400">该平台下暂无账号</p>
+        </div>
+      ) : (
+        <div className="space-y-8">
+          {Object.entries(grouped).map(([plt, accs]) => {
+            const icon = PLATFORM_ICON[plt] ?? { bg: "bg-slate-100", text: "text-slate-500", char: plt[0]?.toUpperCase() ?? "?" }
+            return (
+              <div key={plt}>
+                {/* 平台分组标题 */}
+                <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4">
+                  {PLATFORM_LABELS[plt] || plt}
+                </h3>
+
+                {/* 卡片网格 */}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                  {accs.map(acc => {
+                    const status = cookieStatusMap[acc.account_id]
+                    const isExpired = status === 'expired'
+                    const entry = getCachedEntry(acc.account_id)
+
+                    return (
+                      <div
+                        key={acc.account_id}
+                        className={`bg-white p-5 rounded-2xl border shadow-sm flex flex-col transition-colors ${
+                          isExpired ? "border-rose-200 bg-rose-50/20" : "border-slate-200"
+                        }`}
+                      >
+                        {/* 卡头：图标 + 状态徽标 */}
+                        <div className="flex justify-between items-start mb-3">
+                          <div className={`w-10 h-10 ${icon.bg} ${icon.text} rounded-lg flex items-center justify-center font-bold text-base flex-shrink-0`}>
+                            {icon.char}
+                          </div>
+                          <StatusBadge accountId={acc.account_id} />
+                        </div>
+
+                        {/* 账号名 + 打开（同行） */}
+                        <div className="flex items-center justify-between gap-3 mb-5">
+                          <h4 className="text-base font-bold text-slate-900 leading-snug line-clamp-2 break-all min-w-0">
+                            {acc.masked_display}
+                          </h4>
+                          {status === 'valid' && (
+                            <button
+                              onClick={() => handleOpenFanqie(acc)}
+                              disabled={!!injectStatusMap[acc.account_id]}
+                              className="flex-shrink-0 inline-flex items-center justify-center w-9 h-9 rounded-full bg-orange-500 hover:bg-orange-600 text-white disabled:opacity-50 transition-colors shadow-sm shadow-orange-200"
+                            >
+                              {injectStatusMap[acc.account_id] === 'injecting'
+                                ? <Loader2 size={15} className="animate-spin" />
+                                : <ExternalLink size={15} />
+                              }
+                            </button>
+                          )}
+                          {isExpired && (
+                            <span className="flex-shrink-0 text-xs text-rose-400 pt-0.5"></span>
+                          )}
+                        </div>
+
+                        {/* 卡底：上次检测 + 操作 */}
+                        <div className={`mt-auto pt-4 border-t flex justify-between items-center ${isExpired ? "border-rose-100" : "border-slate-100"}`}>
+                          {/* 上次检测时间 + 刷新 */}
+                          <div className="flex items-center gap-1.5">
+                            <span className={`text-xs ${isExpired ? "text-rose-300" : "text-slate-400"}`}>
+                              {entry
+                                ? `上次检测：${formatRelativeTime(new Date(entry.checkedAt).toISOString())}`
+                                : "等待检测"
+                              }
+                            </span>
+                            <button
+                              title="重新检测"
+                              onClick={() => recheckOne(acc.account_id)}
+                              disabled={status === 'checking'}
+                              className="text-slate-300 hover:text-slate-500 disabled:opacity-30 transition-colors"
+                            >
+                              <RefreshCw size={11} />
+                            </button>
+                          </div>
+
+                          {/* 操作按钮组 */}
+                          <div className="flex items-center gap-2">
+                            {isExpired && (
+                              <button
+                                onClick={() => setReLoginTarget(acc)}
+                                className="px-3 py-1.5 text-xs font-medium text-white bg-rose-500 hover:bg-rose-600 rounded-md transition-colors"
+                              >
+                                重新登录
+                              </button>
+                            )}
+                            <button
+                              onClick={() => setUnbindTarget(acc)}
+                              className="text-xs font-medium text-red-400 hover:text-red-600 transition-colors"
+                            >
+                              解绑
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
       {/* ── 绑定账号弹窗 ── */}
-      <Dialog open={showBindModal} onOpenChange={setShowBindModal}>
+      <Dialog open={showBindModal} onOpenChange={(open) => { setShowBindModal(open); if (!open) setBindDialogError(null) }}>
         <DialogContent className="sm:max-w-md" onInteractOutside={(e) => e.preventDefault()}>
           <DialogHeader>
             <DialogTitle>绑定新账号</DialogTitle>
           </DialogHeader>
-          <form onSubmit={handleBind} className="space-y-4">
+          <form onSubmit={handleBind} className="space-y-5">
+
+            {/* 平台选择 — 成功后锁定 */}
             <div>
-              <Label>平台</Label>
-              <SelectRadix value={platform} onValueChange={setPlatform}>
-                <SelectItem value="fanqie">番茄小说</SelectItem>
-                <SelectItem value="xhs">小红书</SelectItem>
-                <SelectItem value="wechat">微信公众号</SelectItem>
-                <SelectItem value="yuewen">阅文</SelectItem>
-                <SelectItem value="zhulang">逐浪网</SelectItem>
-              </SelectRadix>
+              <p className="text-sm font-medium text-slate-700 mb-2.5">选择平台</p>
+              <div className={`grid grid-cols-2 gap-3 ${captureStatus === 'done' ? "opacity-50 pointer-events-none" : ""}`}>
+                {[
+                  { value: "fanqie",  label: "番茄小说", bg: "bg-red-50",  text: "text-red-500",  char: "番" },
+                  { value: "zhulang", label: "逐浪网",   bg: "bg-blue-50", text: "text-blue-500", char: "逐" },
+                ].map(opt => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => setPlatform(opt.value)}
+                    className={`flex items-center gap-3 p-3 rounded-xl border-2 transition-all text-left ${
+                      platform === opt.value
+                        ? "border-orange-400 bg-orange-50"
+                        : "border-slate-200 bg-white hover:border-slate-300"
+                    }`}
+                  >
+                    <div className={`w-9 h-9 ${opt.bg} ${opt.text} rounded-lg flex items-center justify-center font-bold text-sm flex-shrink-0`}>
+                      {opt.char}
+                    </div>
+                    <span className={`text-sm font-medium ${platform === opt.value ? "text-orange-700" : "text-slate-700"}`}>
+                      {opt.label}
+                    </span>
+                    {platform === opt.value && (
+                      <span className="ml-auto w-4 h-4 rounded-full bg-orange-500 flex items-center justify-center flex-shrink-0">
+                        <svg width="8" height="8" viewBox="0 0 10 10" fill="none">
+                          <path d="M2 5.5l2.5 2.5 4-4" stroke="white" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+                        </svg>
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </div>
             </div>
 
+            {/* 前往登录 / 已完成 */}
             <div>
-              <Label>显示名</Label>
-              <Input
-                value={displayName}
-                onChange={(e) => setDisplayName(e.target.value)}
-                placeholder="平台账号名称"
-              />
-              <p className="text-xs text-muted-foreground mt-1">在控制台中显示的账号名称，方便识别</p>
-            </div>
-
-            <div>
-              {/* Cookie 标签行：左边 Label，右边自动获取按钮（仅番茄小说显示） */}
-              <div className="flex items-center justify-between mb-1">
-                <Label>平台凭证 (Cookie)</Label>
-                {platform === "fanqie" && (
+              {captureStatus === 'done' ? (
+                /* 成功态：显示已完成 + 重新获取链接 */
+                <div className="flex items-center justify-between px-3 py-2.5 rounded-lg bg-emerald-50 border border-emerald-100">
+                  <div className="flex items-center gap-2 text-sm font-medium text-emerald-600">
+                    <CheckCircle size={15} />
+                    登录完成，凭证已获取
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => { resetCaptureState(); setCredentials(""); setDisplayName("") }}
+                    className="text-xs text-slate-400 hover:text-orange-500 underline underline-offset-2 transition-colors"
+                  >
+                    重新获取
+                  </button>
+                </div>
+              ) : (
+                /* 默认态 / 进行态 */
+                <>
                   <button
                     type="button"
                     onClick={() => handleAutoCapture('bind')}
                     disabled={captureStatus === 'running'}
-                    className="inline-flex items-center gap-1.5 text-xs text-primary hover:text-primary/80 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg border-2 border-dashed border-orange-300 bg-orange-50 text-orange-600 hover:bg-orange-100 hover:border-orange-400 disabled:opacity-60 disabled:cursor-not-allowed transition-all text-sm font-medium"
                   >
                     {captureStatus === 'running'
-                      ? <Loader2 size={12} className="animate-spin" />
-                      : <Wand2 size={12} />
+                      ? <><Loader2 size={14} className="animate-spin" />正在连接中...</>
+                      : <><LogIn size={14} />前往登录</>
                     }
-                    自动获取 Cookie
                   </button>
-                )}
-              </div>
 
-              {/* 番茄小说：显示抓取状态提示 */}
-              {platform === "fanqie" && captureStatus !== 'idle' && (
-                <div className={`flex items-center gap-1.5 text-xs mb-2 ${
-                  captureStatus === 'error'
-                    ? 'text-destructive'
-                    : captureStatus === 'done'
-                    ? 'text-[#22c55e]'
-                    : 'text-muted-foreground'
-                }`}>
-                  {captureStatus === 'running' && <Loader2 size={11} className="animate-spin flex-shrink-0" />}
-                  {captureStatus === 'done' && <CheckCircle size={11} className="flex-shrink-0" />}
-                  {captureStatus === 'error' && <AlertCircle size={11} className="flex-shrink-0" />}
-                  <span>{captureMessage}</span>
-                </div>
+                  {/* 等待登录阶段：引导提示卡 */}
+                  {captureStatus === 'running' && captureMessage.includes('登录') && (
+                    <div className="mt-3 rounded-xl bg-slate-50 border border-slate-200 p-4">
+                      <div className="flex gap-3">
+                        <div className="flex flex-col items-center gap-1 pt-0.5">
+                          <div className="w-5 h-5 rounded-full bg-orange-500 flex items-center justify-center flex-shrink-0">
+                            <Loader2 size={11} className="text-white animate-spin" />
+                          </div>
+                          <div className="w-px flex-1 bg-slate-200 min-h-[24px]" />
+                        </div>
+                        <div className="pb-2">
+                          <p className="text-sm font-medium text-slate-800 leading-snug">
+                            请在弹出的窗口中完成登录
+                          </p>
+                          <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                            登录成功后，程序将自动识别并保存凭证，页面会自动关闭。<br />
+                            <span className="text-orange-400 font-medium">请勿手动关闭登录窗口。</span>
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => window.postMessage({ type: 'FANQIE_MANUAL_CAPTURE', platform }, '*')}
+                        className="mt-2 text-xs text-slate-400 hover:text-orange-500 underline underline-offset-2 transition-colors block"
+                      >
+                        已登录但窗口未关闭？点此手动触发
+                      </button>
+                    </div>
+                  )}
+                </>
               )}
-              {/* 登录等待阶段的手动兜底按钮 */}
-              {platform === "fanqie" && captureStatus === 'running' && captureMessage.includes('验证码登录') && (
-                <button
-                  type="button"
-                  onClick={() => window.postMessage({ type: 'FANQIE_MANUAL_CAPTURE' }, '*')}
-                  className="text-xs text-primary/70 hover:text-primary underline mb-2 block"
-                >
-                  已完成登录但页面未跳转？点此手动获取
-                </button>
-              )}
-
-              <Textarea
-                value={credentials}
-                onChange={(e) => setCredentials(e.target.value)}
-                placeholder="粘贴完整的 Cookie 字符串，或点击上方「自动获取 Cookie」..."
-                rows={4}
-              />
-              <p className="text-xs text-muted-foreground mt-1">凭证将被加密存储，不会明文记录</p>
             </div>
 
+            {/* 抓取结果展示区 */}
+            {captureStatus === 'done' && credentials && (
+              <div className="rounded-xl bg-emerald-50 border border-emerald-100 p-4 space-y-2">
+                <div className="flex items-center gap-2 mb-1">
+                  <CheckCircle size={14} className="text-emerald-500 flex-shrink-0" />
+                  <span className="text-sm font-medium text-emerald-700">获取成功</span>
+                </div>
+                {displayName && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-slate-400 w-16 flex-shrink-0">账号名</span>
+                    <span className="text-sm text-slate-900 font-medium truncate">{displayName}</span>
+                  </div>
+                )}
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-slate-400 w-16 flex-shrink-0">凭证</span>
+                  <span className="text-sm text-slate-600">已加密保存，共 {credentials.split(';').filter(Boolean).length} 条</span>
+                </div>
+              </div>
+            )}
+
+            {captureStatus === 'error' && (
+              <div className="flex items-start gap-2 rounded-xl bg-red-50 border border-red-100 p-3">
+                <AlertCircle size={14} className="text-red-400 flex-shrink-0 mt-0.5" />
+                <p className="text-xs text-red-600">{captureMessage || '获取失败，请重试'}</p>
+              </div>
+            )}
+
             <DialogFooter>
+              {bindDialogError && (
+                <p className="flex items-center gap-1.5 text-xs text-red-500 mr-auto">
+                  <AlertCircle size={13} />{bindDialogError}
+                </p>
+              )}
               <Button type="button" variant="ghost" onClick={() => setShowBindModal(false)}>取消</Button>
-              <Button type="submit" disabled={binding}>
-                {binding ? <><Loader2 className="w-4 h-4 animate-spin" />绑定中...</> : "确认绑定"}
+              <Button type="submit" disabled={binding || !credentials.trim()}>
+                {binding ? <><Loader2 className="w-4 h-4 animate-spin" />提交中...</> : "完成"}
               </Button>
             </DialogFooter>
           </form>
         </DialogContent>
       </Dialog>
 
-      {/* ── 账号列表 ── */}
-      {loading ? (
-        <div className="flex items-center justify-center py-20">
-          <Loader2 className="w-6 h-6 animate-spin text-primary" />
-        </div>
-      ) : error ? (
-        <div className="flex flex-col items-center justify-center py-20">
-          <AlertCircle className="w-12 h-12 mb-4 text-destructive opacity-40" />
-          <p className="text-sm text-muted-foreground mb-1">{error}</p>
-          <Button variant="ghost" size="sm" onClick={loadAccounts}>重试</Button>
-        </div>
-      ) : accounts.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-20">
-          <div className="w-32 h-32 mb-5 rounded-lg border border-[#e5e6eb] bg-[#f7f8fa] flex items-center justify-center">
-            <Shield className="w-12 h-12 text-[#c9cdd4]" />
-          </div>
-          <p className="text-sm text-muted-foreground mb-5">还没有绑定的账号</p>
-          <Button size="lg" onClick={() => setShowBindModal(true)}><Plus size={16} /> 绑定账号</Button>
-        </div>
-      ) : pagedAccounts.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-20">
-          <p className="text-sm text-muted-foreground">该平台下暂无账号</p>
-        </div>
-      ) : (
-        <div className="bg-white rounded-lg border border-[#e5e6eb] overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full table-fixed">
-              <thead>
-                <tr className="border-b border-border">
-                  <th className="text-left py-3 px-5 text-xs font-medium text-muted-foreground uppercase tracking-wider w-1/5">平台</th>
-                  <th className="text-left py-3 px-5 text-xs font-medium text-muted-foreground uppercase tracking-wider w-1/5">账号名</th>
-                  <th className="text-left py-3 px-5 text-xs font-medium text-muted-foreground uppercase tracking-wider w-1/5">登录状态</th>
-                  <th className="text-left py-3 px-5 text-xs font-medium text-muted-foreground uppercase tracking-wider w-1/5">绑定时间</th>
-                  <th className="py-3 px-5 text-xs font-medium text-muted-foreground uppercase tracking-wider w-1/5">
-                    <div className="flex justify-end">操作</div>
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {pagedAccounts.map((acc) => (
-                  <tr key={acc.account_id} className="border-b border-border last:border-b-0 hover:bg-muted/50 transition-colors">
-                    <td className="py-4 px-5">
-                      <span className="text-sm font-medium text-foreground">
-                        {PLATFORM_LABELS[acc.platform] || acc.platform}
-                      </span>
-                    </td>
-                    <td className="py-4 px-5">
-                      <span className="text-sm text-foreground">{acc.masked_display}</span>
-                    </td>
-                    <td className="py-4 px-5">
-                      <div className="flex items-center gap-2 whitespace-nowrap">
-                        <CookieStatusBadge accountId={acc.account_id} />
-                        <button
-                          title="重新检测"
-                          onClick={() => recheckOne(acc.account_id)}
-                          disabled={cookieStatusMap[acc.account_id] === 'checking'}
-                          className="text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors"
-                        >
-                          <RefreshCw size={11} />
-                        </button>
-                      </div>
-                    </td>
-                    <td className="py-4 px-5">
-                      <span className="text-sm text-muted-foreground">
-                        {acc.bound_at ? formatDate(acc.bound_at) : "—"}
-                      </span>
-                    </td>
-                    <td className="py-4 px-5">
-                      <div className="flex justify-end items-center gap-0.5 whitespace-nowrap">
-                        {cookieStatusMap[acc.account_id] === 'valid' && (
-                          <Button
-                            variant="ghost" size="sm"
-                            onClick={() => handleOpenFanqie(acc)}
-                            disabled={!!injectStatusMap[acc.account_id]}
-                            className="text-primary hover:text-primary hover:bg-primary/8"
-                          >
-                            {injectStatusMap[acc.account_id] === 'injecting'
-                              ? <><Loader2 size={12} className="animate-spin" />打开中...</>
-                              : <><ExternalLink size={12} />打开番茄</>
-                            }
-                          </Button>
-                        )}
-                        {cookieStatusMap[acc.account_id] === 'expired' && (
-                          <Button
-                            variant="ghost" size="sm"
-                            onClick={() => setReLoginTarget(acc)}
-                            className="text-amber-500 hover:text-amber-600 hover:bg-amber-500/8"
-                          >
-                            重新登录
-                          </Button>
-                        )}
-                        <Button
-                          variant="ghost" size="sm"
-                          onClick={() => setUnbindTarget(acc)}
-                          className="text-destructive hover:text-destructive hover:bg-destructive/8 pr-0"
-                        >
-                          解绑
-                        </Button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {total > pageSize && (
-        <div className="flex items-center justify-between mt-4 text-sm">
-          <span className="text-[#86909c]">共 {total} 条</span>
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage(page - 1)}>
-              上一页
-            </Button>
-            <span className="text-[#86909c] px-2">{page} / {totalPages}</span>
-            <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => setPage(page + 1)}>
-              下一页
-            </Button>
-          </div>
-        </div>
-      )}
-
       {/* ── 重新登录弹窗 ── */}
-      <Dialog open={!!reLoginTarget} onOpenChange={(open) => !open && setReLoginTarget(null)}>
+      <Dialog open={!!reLoginTarget} onOpenChange={(open) => { if (!open) { setReLoginTarget(null); setReLoginDialogError(null) } }}>
         <DialogContent className="sm:max-w-md" onInteractOutside={(e) => e.preventDefault()}>
           <DialogHeader>
             <DialogTitle>重新登录</DialogTitle>
           </DialogHeader>
 
-          {/* 账号信息提示 */}
+          {/* 账号信息提示条 */}
           <div className="flex items-start gap-3 p-3 rounded-lg bg-amber-50 border border-amber-100">
             <AlertCircle size={15} className="text-amber-500 flex-shrink-0 mt-0.5" />
             <div className="text-sm">
-              <span className="font-medium text-foreground">
-                {PLATFORM_LABELS[reLoginTarget?.platform || ""] || reLoginTarget?.platform}
-              </span>
-              <span className="text-muted-foreground"> · {reLoginTarget?.masked_display}</span>
-              <p className="text-xs text-muted-foreground mt-0.5">当前 Cookie 已失效，请重新获取以恢复正常使用</p>
+              <span className="font-medium text-slate-900">{PLATFORM_LABELS[reLoginTarget?.platform || ""] || reLoginTarget?.platform}</span>
+              <span className="text-slate-500"> · {reLoginTarget?.masked_display}</span>
+              <p className="text-xs text-slate-400 mt-0.5">登录态已失效，请重新登录以恢复正常使用</p>
             </div>
           </div>
 
           <form onSubmit={handleReLogin} className="space-y-4">
+
+            {/* 前往登录 / 已完成 */}
             <div>
-              <div className="flex items-center justify-between mb-1">
-                <Label>平台凭证 (Cookie)</Label>
-                {reLoginTarget?.platform === "fanqie" && (
+              {captureStatus === 'done' ? (
+                <div className="flex items-center justify-between px-3 py-2.5 rounded-lg bg-emerald-50 border border-emerald-100">
+                  <div className="flex items-center gap-2 text-sm font-medium text-emerald-600">
+                    <CheckCircle size={15} />
+                    登录完成，凭证已获取
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => { resetCaptureState(); setReLoginCredentials("") }}
+                    className="text-xs text-slate-400 hover:text-orange-500 underline underline-offset-2 transition-colors"
+                  >
+                    重新获取
+                  </button>
+                </div>
+              ) : (
+                <>
                   <button
                     type="button"
                     onClick={() => handleAutoCapture('relogin')}
                     disabled={captureStatus === 'running'}
-                    className="inline-flex items-center gap-1.5 text-xs text-primary hover:text-primary/80 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg border-2 border-dashed border-orange-300 bg-orange-50 text-orange-600 hover:bg-orange-100 hover:border-orange-400 disabled:opacity-60 disabled:cursor-not-allowed transition-all text-sm font-medium"
                   >
                     {captureStatus === 'running'
-                      ? <Loader2 size={12} className="animate-spin" />
-                      : <Wand2 size={12} />
+                      ? <><Loader2 size={14} className="animate-spin" />正在连接中...</>
+                      : <><LogIn size={14} />前往登录</>
                     }
-                    自动获取 Cookie
                   </button>
-                )}
-              </div>
 
-              {reLoginTarget?.platform === "fanqie" && captureStatus !== 'idle' && (
-                <div className={`flex items-center gap-1.5 text-xs mb-2 ${
-                  captureStatus === 'error'
-                    ? 'text-destructive'
-                    : captureStatus === 'done'
-                    ? 'text-[#22c55e]'
-                    : 'text-muted-foreground'
-                }`}>
-                  {captureStatus === 'running' && <Loader2 size={11} className="animate-spin flex-shrink-0" />}
-                  {captureStatus === 'done' && <CheckCircle size={11} className="flex-shrink-0" />}
-                  {captureStatus === 'error' && <AlertCircle size={11} className="flex-shrink-0" />}
-                  <span>{captureMessage}</span>
-                </div>
-              )}
-              {/* 登录等待阶段的手动兜底按钮 */}
-              {reLoginTarget?.platform === "fanqie" && captureStatus === 'running' && captureMessage.includes('验证码登录') && (
-                <button
-                  type="button"
-                  onClick={() => window.postMessage({ type: 'FANQIE_MANUAL_CAPTURE' }, '*')}
-                  className="text-xs text-primary/70 hover:text-primary underline mb-2 block"
-                >
-                  已完成登录但页面未跳转？点此手动获取
-                </button>
-              )}
+                  {/* 等待登录阶段：引导提示卡 */}
+                  {captureStatus === 'running' && captureMessage.includes('登录') && (
+                    <div className="mt-3 rounded-xl bg-slate-50 border border-slate-200 p-4">
+                      <div className="flex gap-3">
+                        <div className="flex flex-col items-center gap-1 pt-0.5">
+                          <div className="w-5 h-5 rounded-full bg-orange-500 flex items-center justify-center flex-shrink-0">
+                            <Loader2 size={11} className="text-white animate-spin" />
+                          </div>
+                          <div className="w-px flex-1 bg-slate-200 min-h-[24px]" />
+                        </div>
+                        <div className="pb-2">
+                          <p className="text-sm font-medium text-slate-800 leading-snug">请在弹出的窗口中完成登录</p>
+                          <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                            登录成功后，程序将自动识别并保存凭证，页面会自动关闭。<br />
+                            <span className="text-orange-400 font-medium">请勿手动关闭登录窗口。</span>
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => window.postMessage({ type: 'FANQIE_MANUAL_CAPTURE', platform: reLoginTarget!.platform }, '*')}
+                        className="mt-2 text-xs text-slate-400 hover:text-orange-500 underline underline-offset-2 transition-colors block"
+                      >
+                        已登录但窗口未关闭？点此手动触发
+                      </button>
+                    </div>
+                  )}
 
-              <Textarea
-                value={reLoginCredentials}
-                onChange={(e) => setReLoginCredentials(e.target.value)}
-                placeholder="粘贴新的 Cookie 字符串，或点击上方「自动获取 Cookie」..."
-                rows={4}
-              />
-              <p className="text-xs text-muted-foreground mt-1">凭证将被加密存储，仅用于替换当前失效的 Cookie</p>
+                  {/* 失败提示 */}
+                  {captureStatus === 'error' && (
+                    <div className="flex items-start gap-2 mt-3 rounded-xl bg-red-50 border border-red-100 p-3">
+                      <AlertCircle size={14} className="text-red-400 flex-shrink-0 mt-0.5" />
+                      <p className="text-xs text-red-600">{captureMessage || '获取失败，请重试'}</p>
+                    </div>
+                  )}
+                </>
+              )}
             </div>
 
+            {/* 成功后展示账号信息 */}
+            {captureStatus === 'done' && reLoginCredentials && (
+              <div className="rounded-xl bg-emerald-50 border border-emerald-100 p-4 space-y-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-slate-400 w-16 flex-shrink-0">账号名</span>
+                  <span className="text-sm text-slate-900 font-medium truncate">{reLoginTarget?.masked_display}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-slate-400 w-16 flex-shrink-0">凭证</span>
+                  <span className="text-sm text-slate-600">已加密保存，共 {reLoginCredentials.split(';').filter(Boolean).length} 条</span>
+                </div>
+              </div>
+            )}
+
             <DialogFooter>
+              {reLoginDialogError && (
+                <p className="flex items-center gap-1.5 text-xs text-red-500 mr-auto">
+                  <AlertCircle size={13} />{reLoginDialogError}
+                </p>
+              )}
               <Button type="button" variant="ghost" onClick={() => setReLoginTarget(null)}>取消</Button>
               <Button type="submit" disabled={reLoginBinding || !reLoginCredentials.trim()}>
-                {reLoginBinding ? <><Loader2 className="w-4 h-4 animate-spin" />更新中...</> : "确认更新"}
+                {reLoginBinding ? <><Loader2 className="w-4 h-4 animate-spin" />提交中...</> : "完成"}
               </Button>
             </DialogFooter>
           </form>
@@ -732,17 +789,18 @@ export default function AccountsPage() {
           <DialogHeader>
             <DialogTitle>确认解绑</DialogTitle>
           </DialogHeader>
-          <p className="text-sm text-muted-foreground">
-            确定要解绑账号 <span className="text-foreground font-medium">
+          <p className="text-sm text-slate-500">
+            确定要解绑账号{" "}
+            <span className="text-slate-900 font-medium">
               {PLATFORM_LABELS[unbindTarget?.platform || ""] || unbindTarget?.platform} · {unbindTarget?.masked_display}
-            </span> 吗？
+            </span>{" "}
+            吗？
           </p>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setUnbindTarget(null)}>取消</Button>
             <Button variant="destructive" onClick={async () => {
               if (!unbindTarget) return
               await handleUnbind(unbindTarget.account_id)
-              if (pagedAccounts.length === 1 && page > 1) setPage(page - 1)
               setUnbindTarget(null)
             }}>
               确认解绑

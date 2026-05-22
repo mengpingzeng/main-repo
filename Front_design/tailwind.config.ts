@@ -8,67 +8,67 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        background: "#ffffff",
-        foreground: "#1d2129",
+        background: "#f8fafc",   // slate-50
+        foreground: "#0f172a",   // slate-900
         primary: {
-          DEFAULT: "#635bff",
-          hover: "#5548e6",
-          active: "#4a3fd4",
-          light: "#f0eeff",
+          DEFAULT: "#f97316",    // orange-500
+          hover:   "#ea6c10",
+          active:  "#c2540a",
+          light:   "#fff7ed",    // orange-50
           foreground: "#ffffff",
         },
         secondary: {
-          DEFAULT: "#f7f8fa",
-          foreground: "#1d2129",
+          DEFAULT: "#f1f5f9",    // slate-100
+          foreground: "#0f172a",
         },
         muted: {
-          DEFAULT: "#f2f3f5",
-          foreground: "#86909c",
+          DEFAULT: "#f1f5f9",
+          foreground: "#64748b", // slate-500
         },
         destructive: {
-          DEFAULT: "#ff4d4f",
+          DEFAULT: "#ef4444",    // red-500
           foreground: "#ffffff",
         },
-        border: "#e5e6eb",
-        ring: "#635bff",
-        input: "#e5e6eb",
+        border:  "#e2e8f0",      // slate-200
+        ring:    "#f97316",      // orange-500
+        input:   "#e2e8f0",
         accent: {
-          DEFAULT: "#f0eeff",
-          foreground: "#635bff",
+          DEFAULT:    "#fff7ed", // orange-50
+          foreground: "#c2540a", // orange-700
         },
         card: {
-          DEFAULT: "#ffffff",
-          foreground: "#1d2129",
+          DEFAULT:    "#ffffff",
+          foreground: "#0f172a",
         },
         popover: {
-          DEFAULT: "#ffffff",
-          foreground: "#1d2129",
+          DEFAULT:    "#ffffff",
+          foreground: "#0f172a",
         },
-        sidebar: "#f7f8fa",
-        stat: "#eff4ff",
+        sidebar: "#ffffff",
+        stat:    "#fff7ed",
       },
       borderRadius: {
-        sm: "4px",
-        md: "6px",
-        lg: "8px",
-        xl: "12px",
-        "2xl": "16px",
+        sm:   "4px",
+        md:   "6px",
+        lg:   "8px",
+        xl:   "12px",
+        "2xl":"16px",
       },
       fontFamily: {
-        sans: ['"PingFang SC"', '"Microsoft YaHei"', '"Hiragino Sans GB"', '"Helvetica Neue"', "Arial", "sans-serif"],
+        sans: ["var(--font-inter)", '"PingFang SC"', '"Microsoft YaHei"', '"Hiragino Sans GB"', "Arial", "sans-serif"],
       },
       keyframes: {
         "fade-in": {
           from: { opacity: "0", transform: "translateY(-4px)" },
-          to: { opacity: "1", transform: "translateY(0)" },
+          to:   { opacity: "1", transform: "translateY(0)" },
         },
         "fade-out": {
           from: { opacity: "1", transform: "translateY(0)" },
-          to: { opacity: "0", transform: "translateY(-4px)" },
+          to:   { opacity: "0", transform: "translateY(-4px)" },
         },
       },
       animation: {
-        "fade-in": "fade-in 0.2s ease-out",
+        "fade-in":  "fade-in 0.2s ease-out",
         "fade-out": "fade-out 0.2s ease-out",
       },
     },

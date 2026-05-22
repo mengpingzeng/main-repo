@@ -2,21 +2,52 @@
 
 import { useEffect, useState, useCallback, useRef } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
-import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import type { TaskSummary } from "@/types"
-import { fetchTasks } from "@/lib/api"
-import { formatDate } from "@/lib/utils"
-import { FileText, Plus, Search, Loader2, AlertCircle } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import type { TaskSummary, AccountSummary } from "@/types"
+import { fetchTasks, fetchAccounts } from "@/lib/api"
+import { formatRelativeTime } from "@/lib/utils"
+import { FileText, Plus, Search, Loader2, AlertCircle, Layers } from "lucide-react"
 import Link from "next/link"
+import { cn } from "@/lib/utils"
+
+const PLATFORM_LABELS: Record<string, { label: string; color: string }> = {
+  fanqie:  { label: "番茄小说", color: "text-red-600 bg-red-50 border-red-100" },
+  zhulang: { label: "逐浪网",   color: "text-blue-600 bg-blue-50 border-blue-100" },
+  xhs:     { label: "小红书",   color: "text-rose-600 bg-rose-50 border-rose-100" },
+  wechat:  { label: "公众号",   color: "text-green-600 bg-green-50 border-green-100" },
+  yuewen:  { label: "阅文",     color: "text-purple-600 bg-purple-50 border-purple-100" },
+}
+
+function platformBadge(p: string) {
+  const conf = PLATFORM_LABELS[p] ?? { label: p, color: "text-slate-600 bg-slate-100 border-slate-200" }
+  return (
+    <span className={cn("px-2.5 py-1 text-[10px] font-bold tracking-wide border rounded-md", conf.color)}>
+      {conf.label}
+    </span>
+  )
+}
+
+const skillLabel = (s: string) => ({
+  xhs_grass_v1: "小红书种草", wechat_deep_v1: "公众号深度长文",
+  wechat_short_v1: "公众号短图文", yuewen_chapter_v1: "阅文章节",
+  fanqie_short_v1: "番茄短篇", general_fallback_v1: "通用兜底",
+  novel_continuation_ai: "小说续写", "my-novel-writer": "小说写手",
+}[s] || s)
+
+const modelLabel = (m: string) => {
+  const name = m.replace(/^(team-deepseek|deepseek)\//, "")
+  return ({ "deepseek-chat": "DeepSeek Chat", "deepseek-reasoner": "DeepSeek Reasoner", "hy3-preview": "混元 3" }[name] || name)
+}
 
 export default function TaskListPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const [tasks, setTasks] = useState<TaskSummary[]>([])
+  const [accountMap, setAccountMap] = useState<Record<string, AccountSummary>>({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
-  const pageSize = 14
+  const pageSize = 12
   const fetchedRef = useRef(false)
 
   const page = Number(searchParams.get("page")) || 1
@@ -38,8 +69,11 @@ export default function TaskListPage() {
     setLoading(true)
     setError("")
     try {
-      const list = await fetchTasks()
+      const [list, accounts] = await Promise.all([fetchTasks(), fetchAccounts()])
       setTasks(list)
+      const map: Record<string, AccountSummary> = {}
+      accounts.forEach(a => { map[a.account_id] = a })
+      setAccountMap(map)
     } catch (err) {
       setError(err instanceof Error ? err.message : "加载失败")
     } finally {
@@ -49,9 +83,7 @@ export default function TaskListPage() {
 
   useEffect(() => { loadTasks() }, [loadTasks])
 
-  useEffect(() => {
-    history.scrollRestoration = "manual"
-  }, [])
+  useEffect(() => { history.scrollRestoration = "manual" }, [])
 
   useEffect(() => {
     if (!loading && tasks.length > 0) {
@@ -65,118 +97,153 @@ export default function TaskListPage() {
 
   const filtered = tasks.filter((t) =>
     !search ||
-    t.topic.toLowerCase().includes(search.toLowerCase()) ||
-    (t.novel_name && t.novel_name.toLowerCase().includes(search.toLowerCase())) ||
-    t.task_id.includes(search)
+    (t.novel_name && t.novel_name.toLowerCase().includes(search.toLowerCase()))
   )
 
   const total = filtered.length
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
   const pagedTasks = filtered.slice((page - 1) * pageSize, page * pageSize)
 
-  const platformLabel = (p: string) => ({ xhs: "小红书", wechat: "公众号", fanqie: "番茄小说", yuewen: "阅文", zhulang: "逐浪网" }[p] || p)
-
-  const skillLabel = (s: string) => ({
-    xhs_grass_v1: "小红书种草", wechat_deep_v1: "公众号深度长文",
-    wechat_short_v1: "公众号短图文", yuewen_chapter_v1: "阅文章节", fanqie_short_v1: "番茄短篇",
-    general_fallback_v1: "通用兜底", novel_continuation_ai: "小说续写",
-    "my-novel-writer": "小说写手",
-  }[s] || s)
-
-  const modelLabel = (m: string) => {
-    const name = m.replace(/^(team-deepseek|deepseek)\//, "")
-    return ({ "deepseek-chat": "DeepSeek Chat", "deepseek-reasoner": "DeepSeek Reasoner", "hy3-preview": "混元 3" }[name] || name)
-  }
-
   return (
-    <div className="w-full max-w-[1080px]">
-      <div className="flex items-center justify-between mb-5">
-        <h1 className="text-lg font-semibold text-foreground">
-          任务列表
-        </h1>
-        <Link href="/tasks/new">
-          <Button size="lg"><Plus size={16} /> 新建任务</Button>
-        </Link>
-      </div>
-
-      <div className="mb-6">
-        <div className="relative">
-          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") updateURL(1, searchInput) }}
-            placeholder="搜索主题或任务ID..."
-            className="pl-9"
-          />
+    <div className="max-w-7xl mx-auto px-6 pt-8">
+      <div className="flex items-end justify-between mb-8">
+        <div>
+          <h1 className="text-3xl font-bold text-slate-900 tracking-tight">任务列表</h1>
+          <p className="text-slate-500 mt-1 text-sm">管理您所有的内容创作与发布任务</p>
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="relative">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <Input
+              value={searchInput}
+              onChange={e => setSearchInput(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter") updateURL(1, searchInput) }}
+              placeholder="搜索小说名..."
+              className="pl-9 w-60 h-9 text-sm"
+            />
+          </div>
+          <Link href="/tasks/new">
+            <button className="px-4 py-2 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-800 shadow-sm flex items-center gap-1.5 transition-colors">
+              <Plus size={15} />新建创作
+            </button>
+          </Link>
         </div>
       </div>
 
+      {/* 内容区 */}
       {loading ? (
-        <div className="flex items-center justify-center py-20">
-          <Loader2 className="w-6 h-6 animate-spin text-primary" />
+        <div className="flex items-center justify-center py-24">
+          <Loader2 className="w-6 h-6 animate-spin text-orange-500" />
         </div>
       ) : error ? (
-        <div className="flex flex-col items-center justify-center py-20">
-          <AlertCircle className="w-12 h-12 mb-4 text-destructive opacity-40" />
-          <p className="text-sm text-muted-foreground mb-1">{error}</p>
-          <Button variant="ghost" size="sm" onClick={loadTasks}>重试</Button>
+        <div className="flex flex-col items-center justify-center py-24 gap-3">
+          <AlertCircle className="w-12 h-12 text-red-300" />
+          <p className="text-sm text-slate-500">{error}</p>
+          <button onClick={loadTasks} className="text-sm text-orange-500 hover:underline">重试</button>
         </div>
       ) : tasks.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-20">
-          <div className="w-40 h-32 mb-5 rounded-lg border border-[#e5e6eb] bg-[#f7f8fa] flex items-center justify-center">
-            <FileText className="w-12 h-12 text-[#c9cdd4]" />
+        <div className="flex flex-col items-center justify-center py-24 gap-4">
+          <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center">
+            <FileText className="w-8 h-8 text-slate-300" />
           </div>
-          <p className="text-sm text-muted-foreground mb-5">还没有创作任务</p>
+          <p className="text-sm text-slate-500">还没有创作任务</p>
           <Link href="/tasks/new">
-            <Button size="lg"><Plus size={16} /> 新建任务</Button>
+            <button className="px-5 py-2.5 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-800 flex items-center gap-1.5 transition-colors shadow-sm">
+              <Plus size={15} />新建创作
+            </button>
           </Link>
         </div>
       ) : (
         <>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {pagedTasks.map((task) => {
-            const hasMeta = task.platform || task.skill_id || task.model || task.draft_version > 0
-            return (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+            {pagedTasks.map(task => (
               <Link
                 key={task.task_id}
                 href={`/tasks/${task.task_id}${task.active_session_id ? `?sid=${task.active_session_id}` : ""}`}
-                className="h-full"
+                className="flex flex-col"
                 onClick={() => sessionStorage.setItem("taskList_scrollY", String(window.scrollY))}
               >
-                <div className="bg-white rounded-lg border border-[#e5e6eb] hover:border-[#b0adff] hover:bg-[#f8f7ff] transition-colors cursor-pointer p-5 h-full flex flex-col">
-                    <h3 className="text-[15px] font-semibold text-foreground leading-snug line-clamp-2">
-                      {task.novel_name || task.topic}
-                    </h3>
+                <div className="bg-white rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow cursor-pointer p-5 flex-1 flex flex-col">
 
-                    <div className="mt-auto pt-4">
-                      {hasMeta && (
-                        <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[13px]">
-                          {task.platform && <span><span className="text-[#86909c]">发布平台</span><span className="text-[#1d2129] ml-1">{platformLabel(task.platform)}</span></span>}
-                          {task.skill_id && <span><span className="text-[#86909c]">写作风格</span><span className="text-[#1d2129] ml-1">{skillLabel(task.skill_id)}</span></span>}
-                          {task.model && <span><span className="text-[#86909c]">AI 模型</span><span className="text-[#1d2129] ml-1">{modelLabel(task.model)}</span></span>}
-                          {task.draft_version > 0 && <span className="text-[#4e5969]">草稿 v{task.draft_version}</span>}
-                        </div>
+                  {/* 平台徽标 + 状态 */}
+                  <div className="flex items-start justify-between gap-2 mb-4">
+                    <div className="flex gap-2">
+                      {task.platform ? platformBadge(task.platform) : (
+                        <span className="px-2.5 py-1 text-[10px] font-bold tracking-wide text-slate-500 bg-slate-100 border border-slate-200 rounded-md">未设平台</span>
                       )}
+                    </div>
+                    <span className="flex items-center text-xs font-medium text-orange-600 bg-orange-50 px-2 py-1 rounded-md flex-shrink-0">
+                      <span className="w-1.5 h-1.5 rounded-full bg-orange-500 mr-1.5 animate-pulse" />AI 生成中
+                    </span>
+                  </div>
 
-                      <div className="text-xs mt-2.5">
-                        <span className="text-[#86909c]">创建时间</span><span className="text-[#4e5969] ml-1">{formatDate(task.created_at)}</span>
-                      </div>
+                  {/* 标题 */}
+                  <h3 className="text-[17px] font-bold text-slate-900 leading-snug line-clamp-1 mb-2">
+                    {task.novel_name || task.topic}
+                  </h3>
+
+                  {/* 描述 */}
+                  <p className="text-sm text-slate-500 line-clamp-2 mb-4 leading-relaxed">
+                    {task.topic}
+                  </p>
+
+                  {/* 模型 & 技能标签 */}
+                  <div className="flex flex-wrap gap-1.5 mb-4">
+                    {task.model && (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-600 border border-slate-200">
+                        模型: {modelLabel(task.model)}
+                      </span>
+                    )}
+                    {task.skill_id && (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-600 border border-slate-200">
+                        Skill: {skillLabel(task.skill_id)}
+                      </span>
+                    )}
+                    {task.draft_version > 0 && (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-orange-50 text-orange-600 border border-orange-100">
+                        v{task.draft_version}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* 底部 */}
+                  <div className="mt-auto pt-4 border-t border-slate-100">
+                    <div className="flex items-center justify-between mb-1">
+                      {task.published_chapter_count != null && task.published_chapter_count > 0 ? (
+                        <span className="text-xs font-medium text-slate-500 flex items-center gap-1">
+                          <Layers size={13} className="text-slate-400" />
+                          已发布: {task.published_chapter_count} 章
+                        </span>
+                      ) : (
+                        <span className="text-xs text-slate-400">暂无发布章节</span>
+                      )}
+                      {task.account_id && accountMap[task.account_id] && (
+                        <span className="text-[11px] font-medium text-orange-500 truncate max-w-[130px]">
+                          {accountMap[task.account_id].masked_display}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center justify-between text-[11px] text-slate-400 mt-1">
+                      <span>更新于 {formatRelativeTime(task.last_active_at || task.created_at)}</span>
+                      <span>创建于 {formatRelativeTime(task.created_at)}</span>
                     </div>
                   </div>
+                </div>
               </Link>
-          )})}
-        </div>
-        {total > pageSize && (
-          <div className="flex items-center justify-between mt-4 text-sm">
-            <span className="text-[#86909c]">共 {total} 条</span>
-            <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => updateURL(page - 1, search)}>上一页</Button>
-              <span className="text-[#86909c] px-2">{page} / {totalPages}</span>
-              <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => updateURL(page + 1, search)}>下一页</Button>
-            </div>
+            ))}
           </div>
-        )}
+
+          {/* 分页 */}
+          {total > pageSize && (
+            <div className="flex items-center justify-between mt-8 text-sm">
+              <span className="text-slate-500">共 {total} 条</span>
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => updateURL(page - 1, search)}>上一页</Button>
+                <span className="text-slate-500 px-2">{page} / {totalPages}</span>
+                <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => updateURL(page + 1, search)}>下一页</Button>
+              </div>
+            </div>
+          )}
         </>
       )}
     </div>
