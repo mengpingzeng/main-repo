@@ -3,7 +3,9 @@ package workflow_engine
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"regexp"
+	"strings"
 	"time"
 )
 
@@ -94,8 +96,13 @@ func stepMDWriting(ctx context.Context, task *WorkflowTask, a4 MDWriter, db *sql
 		TaskID:         task.TaskID,
 		UID:            task.UID,
 		SkillID:        task.SkillID,
+		SkillName:      task.SkillName,
+		Model:          task.Model,
 		Topic:          task.Topic,
-		Platform:       task.Platform,
+		NovelName:      task.NovelName,
+		VolumeName:     task.VolumeName,
+		Title:          task.Title,
+		ChapterNumber:  task.ChapterNumber,
 		SessionID:      task.SessionID,
 		DraftVersion:   task.DraftVersion,
 		PublishResults: task.PublishResults,
@@ -123,12 +130,42 @@ func resolveFinalStatus(task *WorkflowTask) string {
 }
 
 func stripMarkdown(text string) string {
+	text = stripMetaCommentary(text)
+	text = extractNovelContent(text)
+	text = normalizeNewlines(text)
 	re := importRegexp()
 	text = re.heading.ReplaceAllString(text, "$1")
 	text = re.chapterHeader.ReplaceAllString(text, "")
 	text = re.bold.ReplaceAllString(text, "$1")
 	text = re.italic.ReplaceAllString(text, "$1")
+	text = strings.TrimSpace(text)
 	return text
+}
+
+var metaCommentaryRx = regexp.MustCompile(`(?m)^.*已(直接)?输出.*current_draft\.md.*$\n?`)
+var excessNewlineRx = regexp.MustCompile(`\n{3,}`)
+
+func stripMetaCommentary(text string) string {
+	return metaCommentaryRx.ReplaceAllString(text, "")
+}
+
+func normalizeNewlines(text string) string {
+	return excessNewlineRx.ReplaceAllString(text, "\n\n")
+}
+
+func extractNovelContent(draftContent string) string {
+	var data map[string]interface{}
+	if err := json.Unmarshal([]byte(draftContent), &data); err != nil {
+		return draftContent
+	}
+	if content, ok := data["content"]; ok {
+		if s, ok := content.(string); ok {
+			s = strings.ReplaceAll(s, "\\n\\n", "\n\n")
+			s = strings.ReplaceAll(s, "\\n", "\n")
+			return s
+		}
+	}
+	return draftContent
 }
 
 var mdRegexp *markdownRegexp

@@ -201,6 +201,15 @@ func (e *Engine) runStateMachine(ctx context.Context, task *WorkflowTask) error 
 					return err
 				}
 			}
+			if smFetcher, ok := e.draftFetcher.(*SMDraftFetcher); ok {
+				skillID, model := smFetcher.FetchTaskMeta(task.TaskID)
+				if task.SkillID == "" && skillID != "" {
+					task.SkillID = skillID
+				}
+				if task.Model == "" && model != "" {
+					task.Model = model
+				}
+			}
 			next, err = stepMDWriting(ctx, task, e.a4, e.db, draftContent)
 
 		case StatusMDWritten:

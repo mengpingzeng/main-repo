@@ -77,6 +77,8 @@ type WorkflowTask struct {
 	TaskID         string          `json:"taskId"`
 	UID            string          `json:"uid"`
 	SkillID        string          `json:"skillId"`
+	SkillName      string          `json:"skillName"`
+	Model          string          `json:"model"`
 	Topic          string          `json:"topic"`
 	Platform       string          `json:"platform"`
 	Status         string          `json:"status"`
@@ -109,9 +111,12 @@ type MDWriteRequest struct {
 	UID            string          `json:"uid"`
 	SkillID        string          `json:"skillId"`
 	SkillName      string          `json:"skillName"`
-	SkillVersion   string          `json:"skillVersion"`
 	Model          string          `json:"model"`
 	Topic          string          `json:"topic"`
+	NovelName      string          `json:"novelName"`
+	VolumeName     string          `json:"volumeName"`
+	Title          string          `json:"title"`
+	ChapterNumber  int             `json:"chapterNumber"`
 	Platform       string          `json:"platform"`
 	SessionID      string          `json:"sessionId"`
 	Sessions       []SessionInfo   `json:"sessions"`

@@ -16,7 +16,7 @@ import (
 )
 
 func main() {
-	dsn := getEnv("WF_DB_DSN", "user:pass@tcp(127.0.0.1:3306)/xlongxia?parseTime=true")
+	dsn := getEnv("WF_DB_DSN", "xlongxia:Xlongxia_123@tcp(127.0.0.1:3306)/xlongxia?parseTime=true")
 	port := getEnv("WF_LISTEN_PORT", "9100")
 
 	db, err := sql.Open("mysql", dsn)
@@ -28,45 +28,37 @@ func main() {
 
 	wsHub := workflow_engine.NewWSHub()
 
-	var c1Publisher workflow_engine.C1Publisher = &workflow_engine.MockC1Publisher{}
-	var mdWriter workflow_engine.MDWriter = &workflow_engine.MockMDWriter{}
+	var c1Publisher workflow_engine.C1Publisher
+	var mdWriter workflow_engine.MDWriter
 	var draftFetcher workflow_engine.DraftFetcher = &workflow_engine.SMDraftFetcher{
 		DataDir: getEnv("SM_DATA_DIR", "/tmp/sm_demo"),
 	}
 
-	a1BaseURL := getEnv("A1_BASE_URL", "")
-	if a1BaseURL != "" {
-		fanqieAdapter := c1.NewFanqiePublishAdapter(c1.AdapterConfig{
-			ScriptPath: getEnv("FANQIE_SCRIPT", "/home/claw_studios/code/L1_AI_Releaser/scripts/publish_fanqie.js"),
-			Timeout:    300 * time.Second,
-		})
-		zhulangAdapter := c1.NewZhulangPublishAdapter(c1.AdapterConfig{
-			ScriptPath: getEnv("ZHULANG_SCRIPT", "/home/claw_studios/code/L1_AI_Releaser/scripts/publish_zhulang.js"),
-			Timeout:    300 * time.Second,
-		})
-		realPub := c1.NewRealPublisher(c1.Config{
-			A1BaseURL: a1BaseURL,
-			Adapters:  []c1.PublishAdapter{fanqieAdapter, zhulangAdapter},
-			DB:        db,
-		})
-		adapter := workflow_engine.NewRealC1Adapter(realPub, "", "", "")
-		c1Publisher = adapter
-		log.Printf("using RealC1Publisher (A1=%s)", a1BaseURL)
-	} else {
-		log.Printf("using MockC1Publisher")
+	a4StorageDir := getEnv("A4_STORAGE_DIR", "/tmp/sm_demo")
+	a4Adapter, err := workflow_engine.NewRealMDWriterAdapter(a4StorageDir)
+	if err != nil {
+		log.Fatalf("init A4 adapter (storage=%s): %v", a4StorageDir, err)
 	}
+	mdWriter = a4Adapter
+	log.Printf("using RealMDWriter (A4 storage=%s)", a4StorageDir)
 
-	a4StorageDir := getEnv("A4_STORAGE_DIR", "")
-	if a4StorageDir != "" {
-		a4Adapter, err := workflow_engine.NewRealMDWriterAdapter(a4StorageDir)
-		if err != nil {
-			log.Fatalf("init A4 adapter: %v", err)
-		}
-		mdWriter = a4Adapter
-		log.Printf("using RealMDWriter (A4 storage=%s)", a4StorageDir)
-	} else {
-		log.Printf("using MockMDWriter")
-	}
+	a1BaseURL := getEnv("A1_BASE_URL", "http://localhost:8084")
+	fanqieAdapter := c1.NewFanqiePublishAdapter(c1.AdapterConfig{
+		ScriptPath: getEnv("FANQIE_SCRIPT", "/home/claw_studios/code/L1_AI_Releaser/scripts/publish_fanqie.js"),
+		Timeout:    300 * time.Second,
+	})
+	zhulangAdapter := c1.NewZhulangPublishAdapter(c1.AdapterConfig{
+		ScriptPath: getEnv("ZHULANG_SCRIPT", "/home/claw_studios/code/L1_AI_Releaser/scripts/publish_zhulang.js"),
+		Timeout:    300 * time.Second,
+	})
+	realPub := c1.NewRealPublisher(c1.Config{
+		A1BaseURL: a1BaseURL,
+		Adapters:  []c1.PublishAdapter{fanqieAdapter, zhulangAdapter},
+		DB:        db,
+	})
+	adapter := workflow_engine.NewRealC1Adapter(realPub, "", "", "")
+	c1Publisher = adapter
+	log.Printf("using RealC1Publisher (A1=%s)", a1BaseURL)
 
 	eng := workflow_engine.New(workflow_engine.EngineConfig{
 		DB:           db,

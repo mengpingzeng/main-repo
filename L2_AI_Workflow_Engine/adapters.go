@@ -91,6 +91,32 @@ type SMDraftFetcher struct {
 	DataDir string
 }
 
+type smSessionInfo struct {
+	SessionID string `json:"session_id"`
+	SkillID   string `json:"skill_id"`
+	Model     string `json:"model"`
+}
+
+type smTask struct {
+	Sessions []smSessionInfo `json:"-"`
+}
+
+func (f *SMDraftFetcher) FetchTaskMeta(taskID string) (skillID, model string) {
+	path := fmt.Sprintf("%s/tasks/%s/sessions.json", f.DataDir, taskID)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", ""
+	}
+	var sessions []smSessionInfo
+	if err := json.Unmarshal(data, &sessions); err != nil {
+		return "", ""
+	}
+	if len(sessions) > 0 {
+		return sessions[0].SkillID, sessions[0].Model
+	}
+	return "", ""
+}
+
 func (f *SMDraftFetcher) Fetch(ctx context.Context, taskID string, sessionID string, version int) (string, error) {
 	path := fmt.Sprintf("%s/tasks/%s/sessions/%s/cwd/current_draft.md", f.DataDir, taskID, sessionID)
 	data, err := os.ReadFile(path)
