@@ -508,17 +508,25 @@ async function doPublish(cookieStr, input) {
             } catch (e) {}
 
             // Click the best available button
+            // Priority: 忽略全部（错别字） → 下一步 → 提交/确认发布/发布
+            // "忽略全部" must be first to clear the typo modal, otherwise "提交/确认发布"
+            // inside the typo confirmation popup gets clicked in a loop and never progresses.
             let clicked = await page.evaluate(() => {
-                const btns = document.querySelectorAll('button');
-                for (const btn of btns) {
+                const allEls = document.querySelectorAll('button, a, span[class*="btn"], div[class*="btn"]');
+                for (const btn of allEls) {
                     if (btn.offsetParent === null || btn.disabled) continue;
                     const t = btn.textContent.trim();
-                    if (t === '提交' || t === '确认发布' || t === '发布') { btn.click(); return t; }
+                    if (t === '忽略全部') { btn.click(); return t; }
                 }
-                for (const btn of btns) {
+                for (const btn of allEls) {
                     if (btn.offsetParent === null || btn.disabled) continue;
                     const t = btn.textContent.trim();
                     if (t === '下一步') { btn.click(); return '下一步'; }
+                }
+                for (const btn of allEls) {
+                    if (btn.offsetParent === null || btn.disabled) continue;
+                    const t = btn.textContent.trim();
+                    if (t === '提交' || t === '确认发布' || t === '发布') { btn.click(); return t; }
                 }
                 return null;
             });

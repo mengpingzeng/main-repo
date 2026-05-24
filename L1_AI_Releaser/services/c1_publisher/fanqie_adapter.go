@@ -99,10 +99,6 @@ func (a *FanqiePublishAdapter) Publish(ctx context.Context, product ProductConte
 		return a.fail(ErrCodeCredentialFailed, "fanqie cookie is empty", maskedDisplay)
 	}
 
-	// 清理上次可能残留的 Chrome 进程，防止 OOM
-	exec.Command("pkill", "-f", "chrome.*headless").Run()
-	exec.Command("pkill", "-f", "chrome_crashpad").Run()
-
 	// 从 ProductContent 中读取番茄小说专用字段（带默认值回退）
 	title := product.Title
 	if title == "" {
