@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"sync"
+	"time"
 )
 
 // RealPublisher C1 发布器的真实实现。
@@ -44,6 +45,19 @@ func NewRealPublisher(cfg Config) *RealPublisher {
 // Step 4: 逐条 UPSERT publish_record
 // Step 5: 汇总返回
 func (rp *RealPublisher) Publish(ctx context.Context, req PublishRequest) (*PublishResponse, error) {
+	startTime := time.Now()
+
+	platforms := make(map[string]int)
+	for _, a := range req.Accounts {
+		platforms[a.Platform]++
+	}
+
+	logInfo("publish started",
+		"task_id", req.TaskID,
+		"accounts", len(req.Accounts),
+		"platforms", fmt.Sprintf("%v", platforms),
+	)
+
 	if err := rp.validateRequest(req); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidInput, err)
 	}
@@ -75,6 +89,14 @@ func (rp *RealPublisher) Publish(ctx context.Context, req PublishRequest) (*Publ
 	}
 
 	summary := summarize(results)
+	duration := time.Since(startTime)
+
+	logInfo("publish completed",
+		"task_id", req.TaskID,
+		"accounts", fmt.Sprintf("%d/%d/%d", summary.Succeeded, summary.Failed, summary.Total),
+		"elapsed_ms", duration.Milliseconds(),
+	)
+
 	return &PublishResponse{
 		TaskID:  req.TaskID,
 		Results: results,
