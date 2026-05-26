@@ -1,11 +1,11 @@
 "use client"
 
 import { useEffect, useState, useCallback, useRef } from "react"
-import { useAutoMessage } from "@/hooks/useAutoMessage"
 import { Button } from "@/components/ui/button"
 import { Label, Textarea, Input } from "@/components/ui/input"
 import { Select as SelectRadix, SelectItem } from "@/components/ui/select"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
+import { toast } from "@/components/ui/toast"
 import { fetchAccounts, bindAccount, unbindAccount, checkCookieHealth, fetchAccountCredential } from "@/lib/api"
 import {
   getCachedEntry,
@@ -53,7 +53,6 @@ export default function AccountsPage() {
   const [displayName, setDisplayName] = useState("")
   const [credentials, setCredentials] = useState("")
   const [binding, setBinding] = useState(false)
-  const { message, setMessage } = useAutoMessage()
   const [accountFilter, setAccountFilter] = useState("")
   const [unbindTarget, setUnbindTarget] = useState<AccountSummary | null>(null)
   const [reLoginTarget, setReLoginTarget] = useState<AccountSummary | null>(null)
@@ -174,7 +173,7 @@ export default function AccountsPage() {
           break
         case 'FANQIE_INJECT_ERROR':
           setInjectStatusMap({})
-          setMessage({ type: 'error', text: msg || 'Cookie 注入失败，请重试' })
+          toast.error(msg || 'Cookie 注入失败，请重试')
           break
       }
     }
@@ -222,7 +221,7 @@ export default function AccountsPage() {
       setCredentials("")
       setDisplayName("")
       setShowBindModal(false)
-      setMessage({ type: "success", text: resp.is_new_binding ? "绑定成功" : "凭证已更新" })
+      toast.success("绑定成功")
       loadAccounts()
     } catch (err) {
       setBindDialogError(err instanceof Error ? err.message : "绑定失败")
@@ -248,7 +247,7 @@ export default function AccountsPage() {
       }, 10000)
     } catch (err) {
       setInjectStatusMap(prev => ({ ...prev, [acc.account_id]: 'error' }))
-      setMessage({ type: 'error', text: err instanceof Error ? err.message : '获取凭证失败，请重试' })
+      toast.error(err instanceof Error ? err.message : '获取凭证失败，请重试')
       setTimeout(() => setInjectStatusMap(prev => { const next = { ...prev }; delete next[acc.account_id]; return next }), 3000)
     }
   }
@@ -262,7 +261,7 @@ export default function AccountsPage() {
       const resp = await bindAccount(reLoginTarget.platform, reLoginCredentials.trim(), reLoginTarget.masked_display, reLoginTarget.account_id)
       invalidateCache(resp.account_id)
       setReLoginTarget(null)
-      setMessage({ type: "success", text: "Cookie 已更新，登录状态已恢复" })
+      toast.success("Cookie 已更新，登录状态已恢复")
       loadAccounts()
     } catch (err) {
       setReLoginDialogError(err instanceof Error ? err.message : "更新失败，请重试")
@@ -275,10 +274,10 @@ export default function AccountsPage() {
     try {
       await unbindAccount(accountId)
       invalidateCache(accountId)
-      setMessage({ type: "success", text: "已解绑" })
+      toast.success("已解绑")
       loadAccounts()
     } catch (err) {
-      setMessage({ type: "error", text: err instanceof Error ? err.message : "解绑失败" })
+      toast.error(err instanceof Error ? err.message : "解绑失败")
     }
   }
 
@@ -349,18 +348,6 @@ export default function AccountsPage() {
           绑定新账号
         </button>
       </div>
-
-      {/* ── 全局消息条 ── */}
-      {message && (
-        <div className={`mb-6 p-3 rounded-lg text-sm flex items-center gap-2 ${
-          message.type === "success"
-            ? "bg-emerald-50 border border-emerald-100 text-emerald-700"
-            : "bg-red-50 border border-red-100 text-red-600"
-        }`}>
-          {message.type === "success" ? <CheckCircle size={14} /> : <AlertCircle size={14} />}
-          {message.text}
-        </div>
-      )}
 
       {/* ── 平台过滤 Tab ── */}
       <div className="flex items-center gap-1 mb-6 bg-slate-100 rounded-lg p-1 w-fit">

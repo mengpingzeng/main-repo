@@ -18,6 +18,7 @@ import type {
   SessionCreateResponse,
   Session,
   Draft,
+  TaskMessagesResponse,
   SendMessageResponse,
   PublishInput,
   DashboardQueryRequest,
@@ -127,9 +128,15 @@ export async function createTask(input: TaskCreateInput): Promise<TaskCreateResp
   return post<TaskCreateResponse>("/api/task/create", input)
 }
 
-export async function fetchTasks(): Promise<TaskSummary[]> {
-  const resp = await get<TaskListResponse>("/api/task/list")
-  return resp.tasks || []
+export async function fetchTasks(page = 1, size = 12, q = ""): Promise<{ tasks: TaskSummary[]; total: number }> {
+  const params = new URLSearchParams({ page: String(page), size: String(size) })
+  if (q) params.set("q", q)
+  const resp = await get<TaskListResponse>(`/api/task/list?${params.toString()}`)
+  return { tasks: resp.tasks || [], total: resp.total ?? 0 }
+}
+
+export async function fetchTask(taskId: string): Promise<TaskSummary> {
+  return get<TaskSummary>(`/api/task/${taskId}`)
 }
 
 // ===== 会话 =====
@@ -144,6 +151,10 @@ export async function getSession(sessionId: string): Promise<Session> {
 
 export async function getDraft(sessionId: string): Promise<Draft> {
   return get<Draft>(`/api/session/${sessionId}/draft`)
+}
+
+export async function fetchTaskMessages(taskId: string): Promise<TaskMessagesResponse> {
+  return get<TaskMessagesResponse>(`/api/task/${taskId}/messages`)
 }
 
 export async function sendMessage(
@@ -185,15 +196,15 @@ function buildQuery(params: Record<string, unknown>): string {
   return qs ? `?${qs}` : ""
 }
 
-export async function fetchDashboard(req: DashboardQueryRequest = {}): Promise<DashboardQueryResponse> {
-  return get<DashboardQueryResponse>(`/api/dashboard/query${buildQuery(req as unknown as Record<string, unknown>)}`)
+export async function fetchDashboard(page = 1, size = 20, req: Omit<DashboardQueryRequest, "page" | "size"> = {}): Promise<DashboardQueryResponse> {
+  return get<DashboardQueryResponse>(`/api/dashboard/query${buildQuery({ ...req, page, size } as unknown as Record<string, unknown>)}`)
 }
 
 // ===== 用户管理（管理员） =====
 
-export async function fetchUsers(page = 1, size = 20): Promise<{ users: AdminUserInfo[]; total: number }> {
+export async function fetchUsers(page = 1, size = 5): Promise<{ users: AdminUserInfo[]; total: number }> {
   const resp = await get<AdminUserListResponse>(`/api/admin/users?page=${page}&size=${size}`)
-  return { users: resp.users || [], total: resp.total || 0 }
+  return { users: resp.users || [], total: resp.total ?? 0 }
 }
 
 export async function createUser(req: CreateUserRequest): Promise<CreateUserResponse> {
@@ -216,7 +227,17 @@ export async function deleteTask(taskId: string): Promise<void> {
   await del<unknown>(`/api/task/${taskId}`)
 }
 
-export async function fetchTaskSessions(taskId: string): Promise<{ sessions: Array<{ session_id: string; created_at: string; draft_version: number; status: string }> }> {
+export async function fetchTaskSessions(taskId: string): Promise<{
+  sessions: Array<{
+    session_id: string
+    created_at: string
+    draft_version: number
+    status: string
+    skill_id?: string
+    model?: string
+    episodes?: Array<{ decisions?: string }>
+  }>
+}> {
   return get(`/api/task/${taskId}/sessions`)
 }
 

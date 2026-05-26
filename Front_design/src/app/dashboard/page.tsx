@@ -35,9 +35,11 @@ export default function DashboardPage() {
     setPageState(p)
     window.scrollTo({ top: 0, behavior: "smooth" })
   }
-  const pageSize = 10
+  const pageSize = 20
+  const total = data?.total ?? 0
+  const totalPages = Math.max(1, Math.ceil(total / pageSize))
 
-  const loadDashboard = useCallback(async () => {
+  const loadDashboard = useCallback(async (targetPage = page) => {
     setLoading(true)
     setError("")
     try {
@@ -51,22 +53,19 @@ export default function DashboardPage() {
         req.startTime = start.toISOString()
         req.endTime   = now.toISOString()
       }
-      const d = await fetchDashboard(req)
+      const d = await fetchDashboard(targetPage, pageSize, req)
       setData(d)
     } catch (err) {
       setError(err instanceof Error ? err.message : "加载失败")
     } finally {
       setLoading(false)
     }
-  }, [platform, timeRange])
+  }, [platform, timeRange, page, pageSize])
 
-  useEffect(() => { loadDashboard() }, [loadDashboard])
+  useEffect(() => { loadDashboard(page) }, [page, loadDashboard])
   useEffect(() => { setPage(1) }, [platform, timeRange])
 
-  const allItems  = data?.items || []
-  const total     = allItems.length
-  const totalPages = Math.max(1, Math.ceil(total / pageSize))
-  const pagedItems = allItems.slice((page - 1) * pageSize, page * pageSize)
+  const items     = data?.items || []
   const summary   = data?.summary
 
   const statCards = [
@@ -141,13 +140,13 @@ export default function DashboardPage() {
           <AlertCircle className="w-12 h-12 mb-4 text-slate-300" />
           <p className="text-sm text-slate-500 mb-3">{error}</p>
           <button
-            onClick={loadDashboard}
+            onClick={() => loadDashboard(page)}
             className="px-4 py-2 text-sm font-medium border border-slate-200 bg-white text-slate-600 rounded-lg hover:bg-slate-50 transition-colors"
           >
             重试
           </button>
         </div>
-      ) : !allItems.length ? (
+      ) : !items.length ? (
         <div className="flex flex-col items-center justify-center py-24 text-center">
           <div className="w-20 h-20 rounded-2xl bg-slate-100 flex items-center justify-center mb-5">
             <svg width="36" height="36" viewBox="0 0 24 24" fill="none" className="text-slate-300">
@@ -190,7 +189,7 @@ export default function DashboardPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-slate-700">
-                  {pagedItems.map((item, i) => (
+                  {items.map((item, i) => (
                     <tr key={item.postId || i} className="hover:bg-slate-50 transition-colors">
                       <td className="px-6 py-4 font-medium text-slate-900">
                         <div className="line-clamp-2 whitespace-normal leading-snug">{item.novelName}</div>

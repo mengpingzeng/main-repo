@@ -85,6 +85,9 @@ export interface TaskSummary {
   novel_name?: string
   account_id?: string
   published_chapter_count?: number
+  volume_name?: string
+  chapter_number?: number
+  title?: string
   platform: string
   skill_id: string
   model: string
@@ -129,6 +132,7 @@ export interface SessionCreateInput {
   platform?: string
   accountId?: string
   novel_name?: string
+  chapter_number?: number
 }
 
 export interface SessionCreateResponse {
@@ -151,11 +155,17 @@ export interface Session {
 export interface Draft {
   draft: string
   draft_version: number
+  chapter_title?: string
   cwd_path: string
 }
 
 export interface SendMessageResponse {
   accepted: boolean
+}
+
+export interface TaskMessagesResponse {
+  messages: SessionMessage[]
+  count: number
 }
 
 // ===== 发布 (Workflow Engine) =====
@@ -180,6 +190,8 @@ export interface DashboardQueryRequest {
   sessionIds?: string[]
   startTime?: string
   endTime?: string
+  page?: number
+  size?: number
 }
 
 export interface DashboardItem {
@@ -208,12 +220,14 @@ export interface DashboardSummary {
 export interface DashboardQueryResponse {
   items: DashboardItem[]
   summary: DashboardSummary
+  total: number
 }
 
 // ===== WebSocket 事件 =====
 export type WSEventType =
   | "token"
   | "tool_call"
+  | "step_finish"
   | "draft_updated"
   | "novel_name"
   | "episode_created"
@@ -223,6 +237,8 @@ export type WSEventType =
 
 export interface WSEvent {
   type: WSEventType
+  session_id?: string
+  task_id?: string
   text?: string
   tool?: string
   args?: Record<string, unknown>
@@ -233,6 +249,7 @@ export interface WSEvent {
   next_session_id?: string
   reason?: string
   message?: string
+  error?: string
 }
 
 // ===== 消息 =====

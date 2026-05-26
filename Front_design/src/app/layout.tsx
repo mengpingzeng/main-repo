@@ -2,6 +2,7 @@ import type { Metadata } from "next"
 import { Inter } from "next/font/google"
 import { AuthGuard } from "@/components/layout/auth-guard"
 import { LayoutSwitcher } from "@/components/layout/layout-switcher"
+import { ToastContainer } from "@/components/ui/toast"
 import "./globals.css"
 
 const inter = Inter({
@@ -23,6 +24,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <AuthGuard>
           <LayoutSwitcher>{children}</LayoutSwitcher>
         </AuthGuard>
+        <ToastContainer />
       </body>
     </html>
   )

@@ -1,12 +1,14 @@
 "use client"
 
-import { useEffect, useState, useCallback, useRef } from "react"
+import { useEffect, useState, useCallback } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import type { TaskSummary, AccountSummary } from "@/types"
-import { fetchTasks, fetchAccounts } from "@/lib/api"
+import { fetchTasks, fetchAccounts, fetchModels } from "@/lib/api"
+import { formatModelName, buildModelNameMap } from "@/lib/model-label"
 import { formatRelativeTime } from "@/lib/utils"
+import { buildTaskDetailHref } from "@/lib/task-navigation"
 import { FileText, Plus, Search, Loader2, AlertCircle, Layers } from "lucide-react"
 import Link from "next/link"
 import { cn } from "@/lib/utils"
@@ -35,24 +37,21 @@ const skillLabel = (s: string) => ({
   novel_continuation_ai: "小说续写", "my-novel-writer": "小说写手",
 }[s] || s)
 
-const modelLabel = (m: string) => {
-  const name = m.replace(/^(team-deepseek|deepseek)\//, "")
-  return ({ "deepseek-chat": "DeepSeek Chat", "deepseek-reasoner": "DeepSeek Reasoner", "hy3-preview": "混元 3" }[name] || name)
-}
-
 export default function TaskListPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const [tasks, setTasks] = useState<TaskSummary[]>([])
+  const [total, setTotal] = useState(0)
   const [accountMap, setAccountMap] = useState<Record<string, AccountSummary>>({})
+  const [modelNameMap, setModelNameMap] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
   const pageSize = 12
-  const fetchedRef = useRef(false)
 
   const page = Number(searchParams.get("page")) || 1
   const search = searchParams.get("q") || ""
   const [searchInput, setSearchInput] = useState(search)
+  const totalPages = Math.max(1, Math.ceil(total / pageSize))
 
   const updateURL = (p: number, q: string) => {
     const params = new URLSearchParams()
@@ -63,14 +62,18 @@ export default function TaskListPage() {
     window.scrollTo({ top: 0, behavior: "smooth" })
   }
 
-  const loadTasks = useCallback(async () => {
-    if (fetchedRef.current) return
-    fetchedRef.current = true
+  const loadTasks = useCallback(async (targetPage = page, q = search) => {
     setLoading(true)
     setError("")
     try {
-      const [list, accounts] = await Promise.all([fetchTasks(), fetchAccounts()])
-      setTasks(list)
+      const [result, accounts, models] = await Promise.all([
+        fetchTasks(targetPage, pageSize, q),
+        fetchAccounts(),
+        fetchModels(),
+      ])
+      setTasks(result.tasks)
+      setTotal(result.total)
+      setModelNameMap(buildModelNameMap(models))
       const map: Record<string, AccountSummary> = {}
       accounts.forEach(a => { map[a.account_id] = a })
       setAccountMap(map)
@@ -79,30 +82,11 @@ export default function TaskListPage() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [page, pageSize, search])
 
-  useEffect(() => { loadTasks() }, [loadTasks])
-
+  useEffect(() => { loadTasks(page, search) }, [page, search, loadTasks])
+  useEffect(() => { setSearchInput(search) }, [search])
   useEffect(() => { history.scrollRestoration = "manual" }, [])
-
-  useEffect(() => {
-    if (!loading && tasks.length > 0) {
-      const savedY = sessionStorage.getItem("taskList_scrollY")
-      if (savedY) {
-        window.scrollTo({ top: Number(savedY) })
-        sessionStorage.removeItem("taskList_scrollY")
-      }
-    }
-  }, [loading, tasks])
-
-  const filtered = tasks.filter((t) =>
-    !search ||
-    (t.novel_name && t.novel_name.toLowerCase().includes(search.toLowerCase()))
-  )
-
-  const total = filtered.length
-  const totalPages = Math.max(1, Math.ceil(total / pageSize))
-  const pagedTasks = filtered.slice((page - 1) * pageSize, page * pageSize)
 
   return (
     <div className="max-w-7xl mx-auto px-6 pt-8">
@@ -112,15 +96,20 @@ export default function TaskListPage() {
           <p className="text-slate-500 mt-1 text-sm">管理您所有的内容创作与发布任务</p>
         </div>
         <div className="flex items-center gap-3">
-          <div className="relative">
-            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            <Input
-              value={searchInput}
-              onChange={e => setSearchInput(e.target.value)}
-              onKeyDown={e => { if (e.key === "Enter") updateURL(1, searchInput) }}
-              placeholder="搜索小说名..."
-              className="pl-9 w-60 h-9 text-sm"
-            />
+          <div className="relative flex items-center gap-2">
+            <div className="relative">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <Input
+                value={searchInput}
+                onChange={e => setSearchInput(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter") updateURL(1, searchInput.trim()) }}
+                placeholder="搜索小说名..."
+                className="pl-9 w-60 h-9 text-sm"
+              />
+            </div>
+            <Button variant="outline" size="sm" className="h-9" onClick={() => updateURL(1, searchInput.trim())}>
+              搜索
+            </Button>
           </div>
           <Link href="/tasks/new">
             <button className="px-4 py-2 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-800 shadow-sm flex items-center gap-1.5 transition-colors">
@@ -139,29 +128,35 @@ export default function TaskListPage() {
         <div className="flex flex-col items-center justify-center py-24 gap-3">
           <AlertCircle className="w-12 h-12 text-red-300" />
           <p className="text-sm text-slate-500">{error}</p>
-          <button onClick={loadTasks} className="text-sm text-orange-500 hover:underline">重试</button>
+          <button onClick={() => loadTasks(page, search)} className="text-sm text-orange-500 hover:underline">重试</button>
         </div>
-      ) : tasks.length === 0 ? (
+      ) : total === 0 ? (
         <div className="flex flex-col items-center justify-center py-24 gap-4">
           <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center">
             <FileText className="w-8 h-8 text-slate-300" />
           </div>
-          <p className="text-sm text-slate-500">还没有创作任务</p>
-          <Link href="/tasks/new">
-            <button className="px-5 py-2.5 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-800 flex items-center gap-1.5 transition-colors shadow-sm">
-              <Plus size={15} />新建创作
-            </button>
-          </Link>
+          <p className="text-sm text-slate-500">{search ? "没有匹配的任务" : "还没有创作任务"}</p>
+          {!search && (
+            <Link href="/tasks/new">
+              <button className="px-5 py-2.5 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-800 flex items-center gap-1.5 transition-colors shadow-sm">
+                <Plus size={15} />新建创作
+              </button>
+            </Link>
+          )}
         </div>
       ) : (
         <>
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-            {pagedTasks.map(task => (
+            {tasks.map(task => (
               <Link
                 key={task.task_id}
-                href={`/tasks/${task.task_id}${task.active_session_id ? `?sid=${task.active_session_id}` : ""}`}
+                href={buildTaskDetailHref(task.task_id, {
+                  sid: task.active_session_id,
+                  from: "list",
+                  listPage: page,
+                  listQ: search,
+                })}
                 className="flex flex-col"
-                onClick={() => sessionStorage.setItem("taskList_scrollY", String(window.scrollY))}
               >
                 <div className="bg-white rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow cursor-pointer p-5 flex-1 flex flex-col">
 
@@ -183,15 +178,17 @@ export default function TaskListPage() {
                   </h3>
 
                   {/* 描述 */}
-                  <p className="text-sm text-slate-500 line-clamp-2 mb-4 leading-relaxed">
-                    {task.topic}
+                  <p className="text-sm text-slate-500 line-clamp-1 mb-4 leading-relaxed">
+                    {task.volume_name && (task.chapter_number ?? 0) > 0 && task.title
+                      ? `${task.volume_name}第${task.chapter_number}章：${task.title}`
+                      : task.topic}
                   </p>
 
                   {/* 模型 & 技能标签 */}
                   <div className="flex flex-wrap gap-1.5 mb-4">
                     {task.model && (
                       <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-600 border border-slate-200">
-                        模型: {modelLabel(task.model)}
+                        模型: {formatModelName(task.model, modelNameMap)}
                       </span>
                     )}
                     {task.skill_id && (

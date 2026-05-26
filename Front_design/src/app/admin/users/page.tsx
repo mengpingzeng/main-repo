@@ -1,8 +1,8 @@
 "use client"
 
 import { useEffect, useState, useCallback } from "react"
-import { useAutoMessage } from "@/hooks/useAutoMessage"
 import { Button } from "@/components/ui/button"
+import { toast } from "@/components/ui/toast"
 import { Input, Label } from "@/components/ui/input"
 import { Select as SelectRadix, SelectItem } from "@/components/ui/select"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
@@ -10,7 +10,7 @@ import { fetchUsers, createUser, updateUser, deleteUser } from "@/lib/api"
 import { getAuthUser } from "@/lib/auth"
 import type { AdminUserInfo } from "@/types"
 import { formatRelativeTime, formatDate } from "@/lib/utils"
-import { Loader2, AlertCircle, CheckCircle, Eye, EyeOff } from "lucide-react"
+import { Loader2, AlertCircle, Eye, EyeOff } from "lucide-react"
 
 function formatLastLogin(v?: string) {
   if (!v) return <span className="text-slate-300">从未登录</span>
@@ -18,10 +18,10 @@ function formatLastLogin(v?: string) {
 }
 
 export default function AdminUsersPage() {
-  const [allUsers, setAllUsers] = useState<AdminUserInfo[]>([])
+  const [users, setUsers] = useState<AdminUserInfo[]>([])
+  const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
-  const { message, setMessage } = useAutoMessage()
   const [page, setPageState] = useState(1)
 
   const setPage = (p: number) => {
@@ -29,29 +29,28 @@ export default function AdminUsersPage() {
     window.scrollTo({ top: 0, behavior: "smooth" })
   }
   const pageSize = 5
-  const total = allUsers.length
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
-  const users = allUsers.slice((page - 1) * pageSize, page * pageSize)
 
   const [showCreate, setShowCreate] = useState(false)
   const [showEdit, setShowEdit] = useState<AdminUserInfo | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<AdminUserInfo | null>(null)
   const currentUser = getAuthUser()
 
-  const loadUsers = useCallback(async () => {
+  const loadUsers = useCallback(async (targetPage = page) => {
     setLoading(true)
     setError("")
     try {
-      const result = await fetchUsers()
-      setAllUsers(result.users)
+      const result = await fetchUsers(targetPage, pageSize)
+      setUsers(result.users)
+      setTotal(result.total)
     } catch (err) {
       setError(err instanceof Error ? err.message : "加载失败")
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [page, pageSize])
 
-  useEffect(() => { loadUsers() }, [loadUsers])
+  useEffect(() => { loadUsers(page) }, [page, loadUsers])
 
   const getInitials = (name: string) => name.slice(0, 2).toUpperCase()
 
@@ -72,18 +71,6 @@ export default function AdminUsersPage() {
         </button>
       </div>
 
-      {/* 全局消息提示 */}
-      {message && (
-        <div className={`mb-6 p-3 rounded-lg text-sm flex items-center gap-2 ${
-          message.type === "success"
-            ? "bg-emerald-50 border border-emerald-200 text-emerald-700"
-            : "bg-red-50 border border-red-200 text-red-600"
-        }`}>
-          {message.type === "success" ? <CheckCircle size={14} /> : <AlertCircle size={14} />}
-          {message.text}
-        </div>
-      )}
-
       {/* 内容区 */}
       {loading ? (
         <div className="flex items-center justify-center py-24">
@@ -93,7 +80,7 @@ export default function AdminUsersPage() {
         <div className="flex flex-col items-center justify-center py-24">
           <AlertCircle className="w-12 h-12 mb-4 text-slate-300" />
           <p className="text-sm text-slate-500 mb-3">{error}</p>
-          <Button variant="ghost" size="sm" onClick={loadUsers}>重试</Button>
+          <Button variant="ghost" size="sm" onClick={() => loadUsers(page)}>重试</Button>
         </div>
       ) : (
         <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
@@ -119,7 +106,7 @@ export default function AdminUsersPage() {
             <tbody className="divide-y divide-slate-100 text-slate-700">
               {users.map((u) => {
                 const isSelf = u.uid === currentUser?.uid
-                const canDelete = u.accountCount === 0 && !isSelf
+                const canDelete = !isSelf
                 const isAdminRole = u.role === "admin"
                 return (
                   <tr key={u.uid} className="hover:bg-slate-50 transition-colors">
@@ -176,9 +163,9 @@ export default function AdminUsersPage() {
                             编辑
                           </button>
                           <button
-                            onClick={() => canDelete && setDeleteTarget(u)}
+                            onClick={() => setDeleteTarget(u)}
                             disabled={!canDelete}
-                            title={!canDelete ? "请先解绑该用户的账号" : "删除用户"}
+                            title={isSelf ? "不能删除当前登录账号" : "删除用户"}
                             className={canDelete
                               ? "text-red-500 hover:text-red-700 font-medium transition-colors"
                               : "text-slate-300 font-medium cursor-not-allowed"
@@ -228,8 +215,8 @@ export default function AdminUsersPage() {
         onCreated={() => {
           setShowCreate(false)
           setPage(1)
-          loadUsers()
-          setMessage({ type: "success", text: "用户创建成功" })
+          loadUsers(1)
+          toast.success("用户创建成功")
         }}
       />
       {showEdit && (
@@ -239,8 +226,8 @@ export default function AdminUsersPage() {
           onClose={() => setShowEdit(null)}
           onUpdated={() => {
             setShowEdit(null)
-            loadUsers()
-            setMessage({ type: "success", text: "用户信息已更新" })
+            loadUsers(page)
+            toast.success("用户信息已更新")
           }}
         />
       )}
@@ -251,9 +238,9 @@ export default function AdminUsersPage() {
         onDeleted={() => {
           setDeleteTarget(null)
           const newPage = users.length === 1 && page > 1 ? page - 1 : page
-          setPage(newPage)
-          loadUsers()
-          setMessage({ type: "success", text: "用户已删除" })
+          if (newPage !== page) setPage(newPage)
+          else loadUsers(page)
+          toast.success("用户已删除")
         }}
       />
     </div>
@@ -403,13 +390,25 @@ function DeleteConfirmModal({ user, open, onClose, onDeleted }: { user: AdminUse
     }
   }
 
+  const hasAccounts = (user?.accountCount ?? 0) > 0
+
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="sm:max-w-sm">
         <DialogHeader><DialogTitle>确认删除</DialogTitle></DialogHeader>
-        <p className="text-sm text-slate-500">
-          确定要删除用户 <span className="text-slate-900 font-medium">{user?.username}</span> 吗？此操作不可撤销。
-        </p>
+        {hasAccounts ? (
+          <div className="text-sm text-slate-500 space-y-2">
+            <p>
+              用户 <span className="text-slate-900 font-medium">{user?.username}</span> 仍绑定{" "}
+              <span className="text-slate-900 font-medium">{user?.accountCount}</span> 个发布账号。
+            </p>
+            <p>确认删除后，这些账号绑定将一并解除，且无法恢复。是否继续？</p>
+          </div>
+        ) : (
+          <p className="text-sm text-slate-500">
+            确定要删除用户 <span className="text-slate-900 font-medium">{user?.username}</span> 吗？此操作不可撤销。
+          </p>
+        )}
         {error && <div className="text-xs text-destructive bg-destructive/8 rounded-lg px-3 py-2">{error}</div>}
         <DialogFooter>
           <Button variant="ghost" onClick={onClose}>取消</Button>
