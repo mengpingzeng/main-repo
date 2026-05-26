@@ -3,18 +3,22 @@ package c2_dashboard
 // DashboardQueryRequest 看板查询入参（所有字段可选）。
 type DashboardQueryRequest struct {
 	UID        string   `json:"uid,omitempty"`
+	TaskID     string   `json:"taskId,omitempty"`
 	AccountIDs []string `json:"accountIds,omitempty"`
 	Platforms  []string `json:"platforms,omitempty"`
 	SkillIDs   []string `json:"skillIds,omitempty"`
 	SessionIDs []string `json:"sessionIds,omitempty"`
 	StartTime  string   `json:"startTime,omitempty"` // RFC3339
 	EndTime    string   `json:"endTime,omitempty"`   // RFC3339
+	Page       int      `json:"page,omitempty"`
+	Size       int      `json:"size,omitempty"`
 }
 
 // DashboardQueryResponse 看板查询出参。
 type DashboardQueryResponse struct {
 	Items   []DashboardItem  `json:"items"`
 	Summary DashboardSummary `json:"summary"`
+	Total   int              `json:"total"`
 }
 
 // DashboardItem 单条看板条目。

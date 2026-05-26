@@ -40,10 +40,27 @@ WHERE pr.status = 'ok'
       GROUP BY novel_name
   )`
 
-func buildQuery(req DashboardQueryRequest) (string, []interface{}, error) {
+func normalizePagination(page, size int) (int, int) {
+	if page < 1 {
+		page = 1
+	}
+	if size < 1 {
+		size = 20
+	}
+	if size > 100 {
+		size = 100
+	}
+	return page, size
+}
+
+func buildFilteredQuery(req DashboardQueryRequest) (string, []interface{}, error) {
 	query := baseQuery
 	var args []interface{}
 
+	if req.TaskID != "" {
+		query += " AND pr.task_id = ?"
+		args = append(args, req.TaskID)
+	}
 	query += buildInClause("pr.account_id", req.AccountIDs, &args)
 	query += buildInClause("pr.platform", req.Platforms, &args)
 	query += buildInClause("pr.skill_id", req.SkillIDs, &args)
@@ -72,7 +89,35 @@ func buildQuery(req DashboardQueryRequest) (string, []interface{}, error) {
 		args = append(args, t)
 	}
 
-	query += " ORDER BY pr.published_at DESC"
+	return query, args, nil
+}
+
+func buildQuery(req DashboardQueryRequest) (string, []interface{}, error) {
+	query, args, err := buildFilteredQuery(req)
+	if err != nil {
+		return "", nil, err
+	}
+
+	page, size := normalizePagination(req.Page, req.Size)
+	query += " ORDER BY pr.published_at DESC LIMIT ? OFFSET ?"
+	args = append(args, size, (page-1)*size)
+	return query, args, nil
+}
+
+func buildSummaryQuery(req DashboardQueryRequest) (string, []interface{}, error) {
+	filtered, args, err := buildFilteredQuery(req)
+	if err != nil {
+		return "", nil, err
+	}
+
+	query := `
+SELECT
+    COUNT(*) AS total_posts,
+    COALESCE(SUM(views), 0) AS total_views,
+    COALESCE(SUM(likes), 0) AS total_likes,
+    COALESCE(SUM(comments), 0) AS total_comments,
+    COALESCE(SUM(shares), 0) AS total_shares
+FROM (` + filtered + `) AS dashboard_filtered`
 
 	return query, args, nil
 }

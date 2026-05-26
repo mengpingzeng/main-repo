@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"fmt"
 	"time"
+
+	"clawstudios/pkg/logging"
 )
 
 // Querier 看板查询接口（唯一对外暴露的方法）。
@@ -23,8 +25,32 @@ func New(db *sql.DB) Querier {
 }
 
 func (q *dashboardQuerier) Query(ctx context.Context, req DashboardQueryRequest) (*DashboardQueryResponse, error) {
+	logger := logging.FromContext(ctx)
+	startTime := time.Now()
+
+	if logger != nil {
+		logger.Info("dashboard query: uid=%s task=%s platforms=%v page=%d size=%d",
+			req.UID, req.TaskID, req.Platforms, req.Page, req.Size)
+	}
+
 	if err := validateRequest(req); err != nil {
 		return nil, err
+	}
+
+	summaryQuery, summaryArgs, err := buildSummaryQuery(req)
+	if err != nil {
+		return nil, err
+	}
+
+	var summary DashboardSummary
+	if err := q.db.QueryRowContext(ctx, summaryQuery, summaryArgs...).Scan(
+		&summary.TotalPosts,
+		&summary.TotalViews,
+		&summary.TotalLikes,
+		&summary.TotalComments,
+		&summary.TotalShares,
+	); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInternalError, err)
 	}
 
 	sqlQuery, sqlArgs, err := buildQuery(req)
@@ -59,11 +85,19 @@ func (q *dashboardQuerier) Query(ctx context.Context, req DashboardQueryRequest)
 		return nil, fmt.Errorf("%w: %v", ErrInternalError, err)
 	}
 
-	summary := computeSummary(items)
+	if items == nil {
+		items = []DashboardItem{}
+	}
+
+	if logger != nil {
+		logger.Info("dashboard query done: items=%d total=%d duration=%s",
+			len(items), summary.TotalPosts, time.Since(startTime))
+	}
 
 	return &DashboardQueryResponse{
 		Items:   items,
 		Summary: summary,
+		Total:   summary.TotalPosts,
 	}, nil
 }
 
