@@ -12,6 +12,7 @@ type Registry interface {
 	Bootstrap(ctx context.Context, skills []models.BootstrapSkill) (*models.BootstrapResponse, error)
 	Get(ctx context.Context, skillID, version string) (*models.SkillPackage, error)
 	List(ctx context.Context, filter models.SkillFilter) ([]models.SkillSummary, error)
+	AllocSkill(ctx context.Context, platform, theme, style string) (*models.AllocSkillResponse, error)
 	Deprecate(ctx context.Context, skillID, version string) error
 	Validate(skillYAML []byte) (*models.ValidationResult, error)
 	LoadFromDirectory(ctx context.Context, dirPath string) (*LoadSummary, error)

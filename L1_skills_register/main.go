@@ -12,6 +12,7 @@ import (
 	"L1_skills_register/api"
 	"L1_skills_register/registry"
 	"L1_skills_register/store"
+	"clawstudios/pkg/logging"
 )
 
 func main() {
@@ -57,7 +58,7 @@ func main() {
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)
 
-	wrappedMux := api.LoggingMiddleware(api.CORSMiddleware(mux))
+	wrappedMux := logging.HTTPMiddleware("SkillsRegister")(api.CORSMiddleware(mux))
 
 	fmt.Printf("Skill Registry starting\n")
 	fmt.Printf("  Storage:    memory (fake store)\n")

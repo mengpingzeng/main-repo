@@ -3,11 +3,14 @@ package api
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 
 	"L1_skills_register/models"
 	"L1_skills_register/registry"
+	"L1_skills_register/store"
+	"clawstudios/pkg/logging"
 )
 
 const InternalAuthHeader = "X-Internal-Token"
@@ -30,6 +33,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/skill/register", h.handleRegister)
 	mux.HandleFunc("/api/skill/validate", h.handleValidate)
 	mux.HandleFunc("/api/skill/bootstrap", h.handleBootstrap)
+	mux.HandleFunc("/api/skill/alloc", h.handleAllocSkill)
 	mux.HandleFunc("/api/skill/", h.handleSkillByID)
 }
 
@@ -60,6 +64,8 @@ func (h *Handler) handleList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	logger := logging.FromContext(r.Context())
+
 	filter := models.SkillFilter{
 		Category:   r.URL.Query().Get("category"),
 		Visibility: r.URL.Query().Get("visibility"),
@@ -70,6 +76,9 @@ func (h *Handler) handleList(w http.ResponseWriter, r *http.Request) {
 
 	skills, err := h.reg.List(r.Context(), filter)
 	if err != nil {
+		if logger != nil {
+			logger.Error(logging.ErrDatabaseError, "list skills failed: %v", err)
+		}
 		writeError(w, http.StatusInternalServerError, "list_failed", err.Error())
 		return
 	}
@@ -89,8 +98,13 @@ func (h *Handler) handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	logger := logging.FromContext(r.Context())
+
 	var req models.RegisterRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if logger != nil {
+			logger.Error(logging.ErrInvalidParam, "decode register request failed: %v", err)
+		}
 		writeError(w, http.StatusBadRequest, "bad_request", "invalid JSON: "+err.Error())
 		return
 	}
@@ -106,17 +120,26 @@ func (h *Handler) handleRegister(w http.ResponseWriter, r *http.Request) {
 
 	yamlBytes, err := base64.StdEncoding.DecodeString(req.SkillYAML)
 	if err != nil {
+		if logger != nil {
+			logger.Error(logging.ErrInvalidParam, "decode skill_yaml base64 failed: %v", err)
+		}
 		writeError(w, http.StatusBadRequest, "bad_request", "skill_yaml must be base64 encoded")
 		return
 	}
 	promptBytes, err := base64.StdEncoding.DecodeString(req.PromptContent)
 	if err != nil {
+		if logger != nil {
+			logger.Error(logging.ErrInvalidParam, "decode prompt_content base64 failed: %v", err)
+		}
 		writeError(w, http.StatusBadRequest, "bad_request", "prompt_content must be base64 encoded")
 		return
 	}
 
 	pkg, err := h.reg.Register(r.Context(), yamlBytes, promptBytes, req.OwnerUID)
 	if err != nil {
+		if logger != nil {
+			logger.Error(logging.ErrInternal, "register skill failed: %v", err)
+		}
 		code := http.StatusInternalServerError
 		if strings.Contains(err.Error(), "version_conflict") {
 			code = http.StatusConflict
@@ -142,8 +165,13 @@ func (h *Handler) handleValidate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	logger := logging.FromContext(r.Context())
+
 	var req map[string]string
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if logger != nil {
+			logger.Error(logging.ErrInvalidParam, "decode validate request failed: %v", err)
+		}
 		writeError(w, http.StatusBadRequest, "bad_request", "invalid JSON: "+err.Error())
 		return
 	}
@@ -156,12 +184,18 @@ func (h *Handler) handleValidate(w http.ResponseWriter, r *http.Request) {
 
 	yamlBytes, err := base64.StdEncoding.DecodeString(yamlBase64)
 	if err != nil {
+		if logger != nil {
+			logger.Error(logging.ErrInvalidParam, "decode validate skill_yaml base64 failed: %v", err)
+		}
 		writeError(w, http.StatusBadRequest, "bad_request", "skill_yaml must be base64 encoded")
 		return
 	}
 
 	result, err := h.reg.Validate(yamlBytes)
 	if err != nil {
+		if logger != nil {
+			logger.Error(logging.ErrInternal, "validate skill failed: %v", err)
+		}
 		writeError(w, http.StatusInternalServerError, "validate_failed", err.Error())
 		return
 	}
@@ -175,6 +209,8 @@ func (h *Handler) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	logger := logging.FromContext(r.Context())
+
 	if !h.requireInternalAuth(r) {
 		writeError(w, http.StatusForbidden, "forbidden", "internal auth required")
 		return
@@ -182,12 +218,18 @@ func (h *Handler) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 
 	var req models.BootstrapRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if logger != nil {
+			logger.Error(logging.ErrInvalidParam, "decode bootstrap request failed: %v", err)
+		}
 		writeError(w, http.StatusBadRequest, "bad_request", "invalid JSON: "+err.Error())
 		return
 	}
 
 	resp, err := h.reg.Bootstrap(r.Context(), req.Skills)
 	if err != nil {
+		if logger != nil {
+			logger.Error(logging.ErrInternal, "bootstrap skills failed: %v", err)
+		}
 		writeError(w, http.StatusInternalServerError, "bootstrap_failed", err.Error())
 		return
 	}
@@ -202,6 +244,8 @@ func (h *Handler) handleSkillByID(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "skill id required")
 		return
 	}
+
+	logger := logging.FromContext(r.Context())
 
 	parts := strings.SplitN(path, "/", 2)
 	skillID := parts[0]
@@ -231,6 +275,9 @@ func (h *Handler) handleSkillByID(w http.ResponseWriter, r *http.Request) {
 		version := r.URL.Query().Get("version")
 		pkg, err := h.reg.Get(r.Context(), skillID, version)
 		if err != nil {
+			if logger != nil {
+				logger.Error(logging.ErrNotFound, "get skill %s failed: %v", skillID, err)
+			}
 			writeError(w, http.StatusNotFound, "not_found", "skill not found: "+skillID)
 			return
 		}
@@ -259,6 +306,9 @@ func (h *Handler) handleSkillByID(w http.ResponseWriter, r *http.Request) {
 
 	pkg, err := h.reg.Get(r.Context(), skillID, version)
 	if err != nil {
+		if logger != nil {
+			logger.Error(logging.ErrNotFound, "get skill %s failed: %v", skillID, err)
+		}
 		writeError(w, http.StatusNotFound, "not_found", "skill not found: "+skillID)
 		return
 	}
@@ -291,8 +341,13 @@ func (h *Handler) handleDeprecate(w http.ResponseWriter, r *http.Request, skillI
 		return
 	}
 
+	logger := logging.FromContext(r.Context())
+
 	var req models.DeprecateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if logger != nil {
+			logger.Error(logging.ErrInvalidParam, "decode deprecate request failed: %v", err)
+		}
 		writeError(w, http.StatusBadRequest, "bad_request", "invalid JSON: "+err.Error())
 		return
 	}
@@ -303,6 +358,9 @@ func (h *Handler) handleDeprecate(w http.ResponseWriter, r *http.Request, skillI
 	}
 
 	if err := h.reg.Deprecate(r.Context(), skillID, req.Version); err != nil {
+		if logger != nil {
+			logger.Error(logging.ErrInternal, "deprecate skill %s failed: %v", skillID, err)
+		}
 		writeError(w, http.StatusInternalServerError, "deprecate_failed", err.Error())
 		return
 	}
@@ -322,4 +380,45 @@ func writeJSON(w http.ResponseWriter, status int, data interface{}) {
 
 func writeError(w http.ResponseWriter, status int, code, message string) {
 	writeJSON(w, status, models.ApiError{Error: code, Message: message})
+}
+
+func (h *Handler) handleAllocSkill(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "only POST allowed")
+		return
+	}
+
+	logger := logging.FromContext(r.Context())
+
+	var req models.AllocSkillRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if logger != nil {
+			logger.Error(logging.ErrInvalidParam, "decode alloc request failed: %v", err)
+		}
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid JSON: "+err.Error())
+		return
+	}
+
+	if req.Platform == "" {
+		writeError(w, http.StatusBadRequest, "bad_request", "platform is required")
+		return
+	}
+
+	result, err := h.reg.AllocSkill(r.Context(), req.Platform, req.Theme, req.Style)
+	if err != nil {
+		if errors.Is(err, store.ErrNoAvailableSkill) {
+			if logger != nil {
+				logger.Warn(logging.WarnServiceDegraded, "no available skill for platform=%s theme=%s style=%s", req.Platform, req.Theme, req.Style)
+			}
+			writeError(w, http.StatusNotFound, "no_available_skill", "no available skill for the given criteria")
+			return
+		}
+		if logger != nil {
+			logger.Error(logging.ErrInternal, "alloc skill failed: %v", err)
+		}
+		writeError(w, http.StatusInternalServerError, "alloc_failed", err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
 }

@@ -2,7 +2,9 @@ package store
 
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
+	"math/big"
 	"sort"
 	"strings"
 	"sync"
@@ -11,8 +13,9 @@ import (
 )
 
 type FakeSkillStore struct {
-	mu     sync.RWMutex
-	skills map[string]*skillEntry
+	mu        sync.RWMutex
+	skills    map[string]*skillEntry
+	allocated map[string]bool
 }
 
 type skillEntry struct {
@@ -22,7 +25,8 @@ type skillEntry struct {
 
 func NewFakeSkillStore() *FakeSkillStore {
 	return &FakeSkillStore{
-		skills: make(map[string]*skillEntry),
+		skills:    make(map[string]*skillEntry),
+		allocated: make(map[string]bool),
 	}
 }
 
@@ -182,6 +186,75 @@ func (s *FakeSkillStore) CountByOwner(ctx context.Context, ownerUID string) (int
 		}
 	}
 	return count, nil
+}
+
+var ErrNoAvailableSkill = fmt.Errorf("no available skill for the given criteria")
+
+func (s *FakeSkillStore) AllocSkill(ctx context.Context, platform, theme, style string) (*models.AllocSkillResponse, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var candidates []*skillEntry
+	for _, entry := range s.skills {
+		pkg := entry.Pkg
+		if pkg.Status != "active" {
+			continue
+		}
+		if s.allocated[pkg.ID] {
+			continue
+		}
+		if !matchPlatform(pkg.Targets, platform) {
+			continue
+		}
+		if theme != "" {
+			themeLower := strings.ToLower(theme)
+			if !strings.Contains(strings.ToLower(pkg.Name), themeLower) &&
+				!strings.Contains(strings.ToLower(pkg.Description), themeLower) {
+				continue
+			}
+		}
+		if style != "" {
+			styleLower := strings.ToLower(style)
+			if !strings.Contains(strings.ToLower(pkg.Category), styleLower) &&
+				!strings.Contains(strings.ToLower(pkg.Name), styleLower) {
+				continue
+			}
+		}
+		candidates = append(candidates, entry)
+	}
+
+	if len(candidates) == 0 {
+		return nil, ErrNoAvailableSkill
+	}
+
+	n, err := rand.Int(rand.Reader, big.NewInt(int64(len(candidates))))
+	if err != nil {
+		return nil, fmt.Errorf("random selection failed: %w", err)
+	}
+
+	selected := candidates[n.Int64()]
+	s.allocated[selected.Pkg.ID] = true
+
+	return &models.AllocSkillResponse{
+		SkillID:          selected.Pkg.ID,
+		Version:          selected.Pkg.Version,
+		Name:             selected.Pkg.Name,
+		Description:      selected.Pkg.Description,
+		Category:         selected.Pkg.Category,
+		ModelRecommended: selected.Pkg.ModelRecommended,
+	}, nil
+}
+
+func matchPlatform(targets []string, platform string) bool {
+	if len(targets) == 0 {
+		return true
+	}
+	for _, t := range targets {
+		if strings.EqualFold(t, platform) {
+			return true
+		}
+	}
+	return false
 }
 
 func compareVersions(a, b string) int {

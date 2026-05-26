@@ -12,8 +12,11 @@ prompt_template: prompt.tmpl
 output_schema:
   type: object
   required:
+    - chapter_title
     - content
   properties:
+    chapter_title:
+      type: string
     content:
       type: string
 visibility: public

@@ -88,6 +88,21 @@ type DeprecateRequest struct {
 	Version string `json:"version"`
 }
 
+type AllocSkillRequest struct {
+	Platform string `json:"platform"`
+	Theme    string `json:"theme,omitempty"`
+	Style    string `json:"style,omitempty"`
+}
+
+type AllocSkillResponse struct {
+	SkillID          string            `json:"skill_id"`
+	Version          string            `json:"version"`
+	Name             string            `json:"name"`
+	Description      string            `json:"description"`
+	Category         string            `json:"category"`
+	ModelRecommended *ModelRecommended `json:"model_recommended,omitempty"`
+}
+
 type ApiError struct {
 	Error   string `json:"error"`
 	Message string `json:"message"`
