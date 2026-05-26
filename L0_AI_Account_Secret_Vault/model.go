@@ -4,13 +4,15 @@ import "time"
 
 // AccountCredential 账号凭证数据库模型。
 type AccountCredential struct {
-	AccountID     string    `db:"account_id"`
-	UID           string    `db:"uid"`
-	Platform      string    `db:"platform"`
-	Credential    string    `db:"credential"`
-	MaskedDisplay string    `db:"masked_display"`
-	CreatedAt     time.Time `db:"created_at"`
-	UpdatedAt     time.Time `db:"updated_at"`
+	AccountID             string    `db:"account_id"`
+	UID                   string    `db:"uid"`
+	Platform              string    `db:"platform"`
+	Credential            string    `db:"credential"`
+	CredentialFingerprint string    `db:"credential_fingerprint"`
+	PlatformAuthorID      string    `db:"platform_author_id"`
+	MaskedDisplay         string    `db:"masked_display"`
+	CreatedAt             time.Time `db:"created_at"`
+	UpdatedAt             time.Time `db:"updated_at"`
 }
 
 // User 用户模型。

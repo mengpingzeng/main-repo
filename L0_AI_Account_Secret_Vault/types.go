@@ -35,6 +35,7 @@ type AdminUserInfo struct {
 // AdminUserListResponse 用户列表响应。
 type AdminUserListResponse struct {
 	Users []AdminUserInfo `json:"users"`
+	Total int             `json:"total"`
 }
 
 // CreateUserRequest 管理员创建用户请求。

@@ -125,7 +125,23 @@ func (s *UserStore) Authenticate(ctx context.Context, username, password string)
 	return user, nil
 }
 
-func (s *UserStore) ListUsers(ctx context.Context) ([]AdminUserInfo, error) {
+func (s *UserStore) ListUsers(ctx context.Context, page, size int, priorityUID string) ([]AdminUserInfo, int, error) {
+	if page < 1 {
+		page = 1
+	}
+	if size < 1 {
+		size = 5
+	}
+	if size > 100 {
+		size = 100
+	}
+	offset := (page - 1) * size
+
+	var total int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM a1_users`).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count users: %w", err)
+	}
+
 	query := `
 		SELECT u.uid, u.username, u.role, u.created_at,
 		       COALESCE(c.account_count, 0) AS account_count,
@@ -143,11 +159,12 @@ func (s *UserStore) ListUsers(ctx context.Context) ([]AdminUserInfo, error) {
 			FROM workflow_task
 			GROUP BY uid
 		) t ON t.uid COLLATE utf8mb4_unicode_ci = u.uid
-		ORDER BY u.created_at DESC
+		ORDER BY (u.uid = ?) DESC, u.created_at DESC
+		LIMIT ? OFFSET ?
 	`
-	rows, err := s.db.QueryContext(ctx, query)
+	rows, err := s.db.QueryContext(ctx, query, priorityUID, size, offset)
 	if err != nil {
-		return nil, fmt.Errorf("list users: %w", err)
+		return nil, 0, fmt.Errorf("list users: %w", err)
 	}
 	defer rows.Close()
 
@@ -157,7 +174,7 @@ func (s *UserStore) ListUsers(ctx context.Context) ([]AdminUserInfo, error) {
 		var createdAt time.Time
 		var lastLoginAt sql.NullTime
 		if err := rows.Scan(&u.UID, &u.Username, &u.Role, &createdAt, &u.AccountCount, &u.TaskCount, &lastLoginAt); err != nil {
-			return nil, fmt.Errorf("scan user: %w", err)
+			return nil, 0, fmt.Errorf("scan user: %w", err)
 		}
 		u.CreatedAt = createdAt.Format(time.RFC3339)
 		if lastLoginAt.Valid {
@@ -165,7 +182,10 @@ func (s *UserStore) ListUsers(ctx context.Context) ([]AdminUserInfo, error) {
 		}
 		users = append(users, u)
 	}
-	return users, rows.Err()
+	if users == nil {
+		users = []AdminUserInfo{}
+	}
+	return users, total, rows.Err()
 }
 
 func (s *UserStore) UpdateUser(ctx context.Context, uid, password, role string, operatorUID string) error {
@@ -216,16 +236,30 @@ func (s *UserStore) DeleteUser(ctx context.Context, uid, operatorUID string) err
 		return ErrCannotDeleteSelf
 	}
 
-	count, err := s.CountUserAccounts(ctx, uid)
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("count accounts: %w", err)
+		return fmt.Errorf("begin tx: %w", err)
 	}
-	if count > 0 {
-		return ErrHasAccounts
+	defer tx.Rollback()
+
+	// 删除用户前，一并解除其所有绑定账号
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE a1_credentials SET credential = '' WHERE uid = ? AND credential IS NOT NULL AND credential != ''`,
+		uid,
+	); err != nil {
+		return fmt.Errorf("unbind accounts: %w", err)
 	}
 
-	_, err = s.db.ExecContext(ctx, `DELETE FROM a1_users WHERE uid = ?`, uid)
-	return err
+	res, err := tx.ExecContext(ctx, `DELETE FROM a1_users WHERE uid = ?`, uid)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return nil
+	}
+
+	return tx.Commit()
 }
 
 func (s *UserStore) CountUserAccounts(ctx context.Context, uid string) (int, error) {

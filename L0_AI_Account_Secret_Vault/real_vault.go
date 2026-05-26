@@ -106,8 +106,8 @@ func (v *RealSecretVault) Login(ctx context.Context, username, password string) 
 	return v.userStore.Authenticate(ctx, username, password)
 }
 
-func (v *RealSecretVault) ListUsers(ctx context.Context) ([]AdminUserInfo, error) {
-	return v.userStore.ListUsers(ctx)
+func (v *RealSecretVault) ListUsers(ctx context.Context, page, size int, priorityUID string) ([]AdminUserInfo, int, error) {
+	return v.userStore.ListUsers(ctx, page, size, priorityUID)
 }
 
 func (v *RealSecretVault) UpdateUser(ctx context.Context, uid, password, role, operatorUID string) error {
@@ -128,6 +128,6 @@ func (v *RealSecretVault) Close() error {
 
 // DSN 返回 MySQL 连接串。
 func (c *Config) DSN() string {
-	return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?parseTime=true&charset=utf8mb4",
+	return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?parseTime=true&charset=utf8mb4&loc=Asia%%2FShanghai",
 		c.DBUser, c.DBPassword, c.DBHost, c.DBPort, c.DBName)
 }

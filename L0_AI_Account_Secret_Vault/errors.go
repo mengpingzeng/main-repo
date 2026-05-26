@@ -152,8 +152,32 @@ var (
 	// ErrDuplicateDisplayName 同平台下账号名已被占用（全局唯一约束）。
 	ErrDuplicateDisplayName = &SecretError{
 		Code:       "DUPLICATE_DISPLAY_NAME",
-		Message:    "该平台下此账号名已被绑定，请使用其他账号",
+		Message:    "该平台下此账号名已被绑定，请使用其他名称",
 		HTTPStatus: http.StatusConflict,
+		Retryable:  false,
+	}
+
+	// ErrDuplicateCredential 同平台下相同 Cookie/凭证已被绑定（全局唯一约束）。
+	ErrDuplicateCredential = &SecretError{
+		Code:       "DUPLICATE_CREDENTIAL",
+		Message:    "该 Cookie 已被其他账号绑定，请勿重复绑定",
+		HTTPStatus: http.StatusConflict,
+		Retryable:  false,
+	}
+
+	// ErrDuplicatePlatformAuthor 同平台作者 ID 已被其他用户绑定。
+	ErrDuplicatePlatformAuthor = &SecretError{
+		Code:       "DUPLICATE_PLATFORM_AUTHOR",
+		Message:    "该平台作者账号已被其他用户绑定",
+		HTTPStatus: http.StatusConflict,
+		Retryable:  false,
+	}
+
+	// ErrPlatformAuthorUnresolved 无法从凭证解析平台作者唯一标识。
+	ErrPlatformAuthorUnresolved = &SecretError{
+		Code:       "PLATFORM_AUTHOR_UNRESOLVED",
+		Message:    "无法识别平台作者身份，请确认 Cookie 有效后重试",
+		HTTPStatus: http.StatusBadRequest,
 		Retryable:  false,
 	}
 )

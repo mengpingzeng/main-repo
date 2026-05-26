@@ -11,8 +11,8 @@ import (
 	"time"
 )
 
-// fanqieCheckURL 用于检测登录态的番茄小说轻量接口。
-const fanqieCheckURL = "https://fanqienovel.com/api/author/account/info/v0/?aid=2503&app_name=muye_novel"
+// fanqieCheckURL 用于检测登录态 / 解析作者身份的番茄小说接口。
+var fanqieCheckURL = "https://fanqienovel.com/api/author/account/info/v0/?aid=2503&app_name=muye_novel"
 
 // zhulangCheckURL 用于检测逐浪网登录态的接口。
 // 不带 callback 参数时返回纯 JSON：{"total":"0","code":1}（已登录）或 code!=1（未登录）。

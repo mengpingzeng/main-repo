@@ -38,6 +38,8 @@ func (m *MockSecretVault) Bind(ctx context.Context, req BindRequest) (*BindRespo
 		return nil, ErrInvalidInput
 	}
 
+	platformAuthorID := mockPlatformAuthorID(req.Platform, req.CredentialsPlaintext)
+
 	accountID := req.AccountID
 	isNewBinding := true
 	if accountID != "" {
@@ -47,14 +49,20 @@ func (m *MockSecretVault) Bind(ctx context.Context, req BindRequest) (*BindRespo
 		if exists {
 			isNewBinding = false
 		}
-	} else {
+	} else if platformAuthorID != "" {
+		m.mu.RLock()
+		for _, existing := range m.store {
+			if existing.UID == req.UID && existing.Platform == req.Platform && existing.PlatformAuthorID == platformAuthorID {
+				accountID = existing.AccountID
+				isNewBinding = false
+				break
+			}
+		}
+		m.mu.RUnlock()
+	}
+	if accountID == "" {
 		m.bindCount++
 		accountID = fmt.Sprintf("acc_%s_%s_%d", req.UID, req.Platform, m.bindCount)
-	}
-
-	encryptResult, err := m.encryptor.Encrypt(ctx, []byte(req.CredentialsPlaintext))
-	if err != nil {
-		return nil, err
 	}
 
 	maskedDisplay := req.MaskedDisplay
@@ -62,15 +70,44 @@ func (m *MockSecretVault) Bind(ctx context.Context, req BindRequest) (*BindRespo
 		maskedDisplay = generateMaskedDisplay(req.Platform, req.CredentialsPlaintext)
 	}
 
+	m.mu.RLock()
+	for _, existing := range m.store {
+		if existing.Credential == "" {
+			continue
+		}
+		if existing.Platform == req.Platform && existing.MaskedDisplay == maskedDisplay && existing.AccountID != accountID {
+			m.mu.RUnlock()
+			return nil, ErrDuplicateDisplayName
+		}
+	}
+	fingerprint := computeCredentialFingerprint(req.Platform, req.CredentialsPlaintext)
+	for _, existing := range m.store {
+		if existing.Credential == "" {
+			continue
+		}
+		if existing.Platform == req.Platform && existing.CredentialFingerprint == fingerprint && existing.AccountID != accountID {
+			m.mu.RUnlock()
+			return nil, ErrDuplicateCredential
+		}
+	}
+	m.mu.RUnlock()
+
+	encryptResult, err := m.encryptor.Encrypt(ctx, []byte(req.CredentialsPlaintext))
+	if err != nil {
+		return nil, err
+	}
+
 	now := time.Now().UTC()
 	cred := &AccountCredential{
-		AccountID:     accountID,
-		UID:           req.UID,
-		Platform:      req.Platform,
-		Credential:    base64.StdEncoding.EncodeToString(encryptResult.Ciphertext),
-		MaskedDisplay: maskedDisplay,
-		CreatedAt:     now,
-		UpdatedAt:     now,
+		AccountID:             accountID,
+		UID:                   req.UID,
+		Platform:              req.Platform,
+		Credential:            base64.StdEncoding.EncodeToString(encryptResult.Ciphertext),
+		CredentialFingerprint: fingerprint,
+		PlatformAuthorID:      platformAuthorID,
+		MaskedDisplay:         maskedDisplay,
+		CreatedAt:             now,
+		UpdatedAt:             now,
 	}
 
 	m.mu.Lock()
@@ -106,6 +143,7 @@ func (m *MockSecretVault) Unbind(ctx context.Context, req UnbindRequest) (*Unbin
 		if cred.AccountID == req.AccountID {
 			now := time.Now().UTC()
 			cred.Credential = ""
+			cred.CredentialFingerprint = ""
 			cred.UpdatedAt = now
 			m.auditLog = append(m.auditLog, AuditEntry{
 				AccountID: req.AccountID,
@@ -406,4 +444,19 @@ func (m *MockSecretVault) SetStoreEntry(key string, cred *AccountCredential) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.store[key] = cred
+}
+
+// mockPlatformAuthorID 测试用：从 Cookie 提取稳定字段模拟平台作者 ID（不发起外网请求）。
+func mockPlatformAuthorID(platform, credentials string) string {
+	switch platform {
+	case "fanqie":
+		if idx := findCookieField(credentials, "sessionid"); idx >= 0 {
+			return "mock_fanqie:" + extractCookieValue(credentials, idx)
+		}
+	case "zhulang":
+		if idx := findCookieField(credentials, "PHPSESSID"); idx >= 0 {
+			return "mock_zhulang:" + extractCookieValue(credentials, idx)
+		}
+	}
+	return ""
 }

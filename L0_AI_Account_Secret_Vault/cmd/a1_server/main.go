@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"os"
@@ -12,6 +14,7 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 
 	vault "L0_AI_Account_Secret_Vault"
+	"clawstudios/pkg/logging"
 )
 
 type server struct {
@@ -38,6 +41,12 @@ func main() {
 		defer rv.Close()
 		srv.vault = rv
 		srv.rv = rv
+		if err := rv.BackfillCredentialFingerprints(context.Background()); err != nil {
+			log.Printf("warning: credential fingerprint backfill failed: %v", err)
+		}
+		if err := rv.BackfillPlatformAuthorIDs(context.Background()); err != nil {
+			log.Printf("warning: platform author id backfill failed: %v", err)
+		}
 	} else {
 		srv.vault = vault.NewMockSecretVault()
 	}
@@ -65,7 +74,7 @@ func main() {
 
 	addr := ":" + port
 	log.Printf("a1_server listening on %s (mode=%s)", addr, cfg.Mode)
-	if err := http.ListenAndServe(addr, mux); err != nil {
+	if err := http.ListenAndServe(addr, logging.HTTPMiddleware("A1AccountVault")(mux)); err != nil {
 		log.Fatalf("server failed: %v", err)
 	}
 }
@@ -104,6 +113,7 @@ func (s *server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 }
 
 func (s *server) handleRegister(w http.ResponseWriter, r *http.Request) {
+	logger := logging.FromContext(r.Context())
 	if s.rv == nil {
 		writeError(w, http.StatusNotImplemented, "NOT_AVAILABLE", "user auth requires real mode")
 		return
@@ -132,12 +142,18 @@ func (s *server) handleRegister(w http.ResponseWriter, r *http.Request) {
 
 	user, err := s.rv.Register(r.Context(), req.Username, req.Password, role)
 	if err != nil {
+		if logger != nil {
+			logger.Error(logging.ErrDatabaseError, "Register user %s failed: %v", req.Username, err)
+		}
 		writeVaultError(w, err)
 		return
 	}
 
 	token, err := vault.GenerateToken(user.UID, user.Username, user.Role, s.jwtSecret)
 	if err != nil {
+		if logger != nil {
+			logger.Error(logging.ErrInternal, "GenerateToken for user %s failed: %v", user.UID, err)
+		}
 		writeError(w, http.StatusInternalServerError, "TOKEN_ERROR", "failed to generate token")
 		return
 	}
@@ -151,6 +167,7 @@ func (s *server) handleRegister(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleLogin(w http.ResponseWriter, r *http.Request) {
+	logger := logging.FromContext(r.Context())
 	if s.rv == nil {
 		writeError(w, http.StatusNotImplemented, "NOT_AVAILABLE", "user auth requires real mode")
 		return
@@ -169,12 +186,18 @@ func (s *server) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 	user, err := s.rv.Login(r.Context(), req.Username, req.Password)
 	if err != nil {
+		if logger != nil {
+			logger.Error(logging.ErrUnauthorized, "Login for user %s failed: %v", req.Username, err)
+		}
 		writeVaultError(w, err)
 		return
 	}
 
 	token, err := vault.GenerateToken(user.UID, user.Username, user.Role, s.jwtSecret)
 	if err != nil {
+		if logger != nil {
+			logger.Error(logging.ErrInternal, "GenerateToken for user %s failed: %v", user.UID, err)
+		}
 		writeError(w, http.StatusInternalServerError, "TOKEN_ERROR", "failed to generate token")
 		return
 	}
@@ -188,8 +211,12 @@ func (s *server) handleLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleBind(w http.ResponseWriter, r *http.Request) {
+	logger := logging.FromContext(r.Context())
 	var req vault.BindRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if logger != nil {
+			logger.Error(logging.ErrInvalidParam, "decode bind request failed: %v", err)
+		}
 		writeError(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body")
 		return
 	}
@@ -218,6 +245,9 @@ func (s *server) handleBind(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := s.vault.Bind(r.Context(), req)
 	if err != nil {
+		if logger != nil {
+			logger.Error(logging.ErrDatabaseError, "Bind account for uid %s failed: %v", uid, err)
+		}
 		writeVaultError(w, err)
 		return
 	}
@@ -225,8 +255,12 @@ func (s *server) handleBind(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleUnbind(w http.ResponseWriter, r *http.Request) {
+	logger := logging.FromContext(r.Context())
 	var req vault.UnbindRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if logger != nil {
+			logger.Error(logging.ErrInvalidParam, "decode unbind request failed: %v", err)
+		}
 		writeError(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body")
 		return
 	}
@@ -256,6 +290,9 @@ func (s *server) handleUnbind(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := s.vault.Unbind(r.Context(), req)
 	if err != nil {
+		if logger != nil {
+			logger.Error(logging.ErrDatabaseError, "Unbind account for uid %s failed: %v", uid, err)
+		}
 		writeVaultError(w, err)
 		return
 	}
@@ -263,6 +300,7 @@ func (s *server) handleUnbind(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleList(w http.ResponseWriter, r *http.Request) {
+	logger := logging.FromContext(r.Context())
 	claims := vault.GetAuthClaims(r.Context())
 	uid := ""
 	role := ""
@@ -298,6 +336,9 @@ func (s *server) handleList(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := s.vault.List(r.Context(), req)
 	if err != nil {
+		if logger != nil {
+			logger.Error(logging.ErrDatabaseError, "List accounts for uid %s failed: %v", uid, err)
+		}
 		writeVaultError(w, err)
 		return
 	}
@@ -305,14 +346,21 @@ func (s *server) handleList(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleGetCredentials(w http.ResponseWriter, r *http.Request) {
+	logger := logging.FromContext(r.Context())
 	var req vault.GetCredentialsRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if logger != nil {
+			logger.Error(logging.ErrInvalidParam, "decode credentials request failed: %v", err)
+		}
 		writeError(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body")
 		return
 	}
 
 	resp, err := s.vault.GetCredentials(r.Context(), req)
 	if err != nil {
+		if logger != nil {
+			logger.Error(logging.ErrDatabaseError, "GetCredentials failed: %v", err)
+		}
 		writeVaultError(w, err)
 		return
 	}
@@ -320,7 +368,11 @@ func (s *server) handleGetCredentials(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	logger := logging.FromContext(r.Context())
 	if err := s.vault.Health(r.Context()); err != nil {
+		if logger != nil {
+			logger.Error(logging.ErrDatabaseError, "Health check failed: %v", err)
+		}
 		writeError(w, http.StatusServiceUnavailable, "UNHEALTHY", err.Error())
 		return
 	}
@@ -339,13 +391,35 @@ func (s *server) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
 }
 
 func (s *server) handleListUsers(w http.ResponseWriter, r *http.Request) {
+	logger := logging.FromContext(r.Context())
 	if s.rv == nil {
 		writeError(w, http.StatusNotImplemented, "NOT_AVAILABLE", "user management requires real mode")
 		return
 	}
 
-	users, err := s.rv.ListUsers(r.Context())
+	page := 1
+	size := 5
+	if p := r.URL.Query().Get("page"); p != "" {
+		if v, err := strconv.Atoi(p); err == nil && v > 0 {
+			page = v
+		}
+	}
+	if sz := r.URL.Query().Get("size"); sz != "" {
+		if v, err := strconv.Atoi(sz); err == nil && v > 0 {
+			size = v
+		}
+	}
+
+	priorityUID := ""
+	if claims := vault.GetAuthClaims(r.Context()); claims != nil {
+		priorityUID = claims.UID
+	}
+
+	users, total, err := s.rv.ListUsers(r.Context(), page, size, priorityUID)
 	if err != nil {
+		if logger != nil {
+			logger.Error(logging.ErrDatabaseError, "ListUsers failed: %v", err)
+		}
 		writeVaultError(w, err)
 		return
 	}
@@ -353,10 +427,11 @@ func (s *server) handleListUsers(w http.ResponseWriter, r *http.Request) {
 	if users == nil {
 		users = []vault.AdminUserInfo{}
 	}
-	writeJSON(w, http.StatusOK, vault.AdminUserListResponse{Users: users})
+	writeJSON(w, http.StatusOK, vault.AdminUserListResponse{Users: users, Total: total})
 }
 
 func (s *server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
+	logger := logging.FromContext(r.Context())
 	if s.rv == nil {
 		writeError(w, http.StatusNotImplemented, "NOT_AVAILABLE", "user management requires real mode")
 		return
@@ -364,6 +439,9 @@ func (s *server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 
 	var req vault.CreateUserRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if logger != nil {
+			logger.Error(logging.ErrInvalidParam, "decode create user request failed: %v", err)
+		}
 		writeError(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body")
 		return
 	}
@@ -385,6 +463,9 @@ func (s *server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 
 	user, err := s.rv.Register(r.Context(), req.Username, req.Password, role)
 	if err != nil {
+		if logger != nil {
+			logger.Error(logging.ErrDatabaseError, "Register user %s failed: %v", req.Username, err)
+		}
 		writeVaultError(w, err)
 		return
 	}
@@ -404,6 +485,7 @@ func (s *server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
+	logger := logging.FromContext(r.Context())
 	if s.rv == nil {
 		writeError(w, http.StatusNotImplemented, "NOT_AVAILABLE", "user management requires real mode")
 		return
@@ -417,6 +499,9 @@ func (s *server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 
 	var req vault.UpdateUserRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if logger != nil {
+			logger.Error(logging.ErrInvalidParam, "decode update user request failed: %v", err)
+		}
 		writeError(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body")
 		return
 	}
@@ -428,6 +513,9 @@ func (s *server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.rv.UpdateUser(r.Context(), uid, req.Password, req.Role, operatorUID); err != nil {
+		if logger != nil {
+			logger.Error(logging.ErrDatabaseError, "UpdateUser(%s) failed: %v", uid, err)
+		}
 		writeVaultError(w, err)
 		return
 	}
@@ -453,6 +541,7 @@ func (s *server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
+	logger := logging.FromContext(r.Context())
 	if s.rv == nil {
 		writeError(w, http.StatusNotImplemented, "NOT_AVAILABLE", "user management requires real mode")
 		return
@@ -470,6 +559,9 @@ func (s *server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.rv.DeleteUser(r.Context(), uid, operatorUID); err != nil {
+		if logger != nil {
+			logger.Error(logging.ErrDatabaseError, "DeleteUser(%s) failed: %v", uid, err)
+		}
 		writeVaultError(w, err)
 		return
 	}
@@ -479,6 +571,7 @@ func (s *server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleCookieHealth(w http.ResponseWriter, r *http.Request) {
+	logger := logging.FromContext(r.Context())
 	accountID := r.PathValue("account_id")
 	if accountID == "" {
 		writeError(w, http.StatusBadRequest, "INVALID_INPUT", "account_id is required")
@@ -498,6 +591,9 @@ func (s *server) handleCookieHealth(w http.ResponseWriter, r *http.Request) {
 		UID:       uid,
 	})
 	if err != nil {
+		if logger != nil {
+			logger.Error(logging.ErrExternalService, "CheckCookieHealth(%s) failed: %v", accountID, err)
+		}
 		writeVaultError(w, err)
 		return
 	}
@@ -505,6 +601,7 @@ func (s *server) handleCookieHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleGetCredentialForOwner(w http.ResponseWriter, r *http.Request) {
+	logger := logging.FromContext(r.Context())
 	accountID := r.PathValue("account_id")
 	if accountID == "" {
 		writeError(w, http.StatusBadRequest, "INVALID_INPUT", "account_id is required")
@@ -521,6 +618,9 @@ func (s *server) handleGetCredentialForOwner(w http.ResponseWriter, r *http.Requ
 
 	resp, err := s.vault.GetCredentialForOwner(r.Context(), accountID, uid)
 	if err != nil {
+		if logger != nil {
+			logger.Error(logging.ErrDatabaseError, "GetCredentialForOwner(%s) failed: %v", accountID, err)
+		}
 		writeVaultError(w, err)
 		return
 	}
@@ -546,5 +646,10 @@ func writeError(w http.ResponseWriter, status int, code, message string) {
 func writeVaultError(w http.ResponseWriter, err error) {
 	status := vault.HTTPStatusCode(err)
 	code := vault.ErrorCode(err)
-	writeError(w, status, code, err.Error())
+	msg := err.Error()
+	var se *vault.SecretError
+	if errors.As(err, &se) {
+		msg = se.Message
+	}
+	writeError(w, status, code, msg)
 }
