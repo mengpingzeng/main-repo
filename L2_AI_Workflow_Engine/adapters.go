@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 	"time"
+
+	"clawstudios/pkg/logging"
 )
 
 // C1Publisher 发布接口（L1 C1 模块实现）
@@ -151,9 +153,15 @@ func setStatus(ctx context.Context, db *sql.DB, task *WorkflowTask, status, errM
 	now := time.Now().UTC()
 	task.Status = status
 	task.ErrorMsg = errMsg
-	db.ExecContext(ctx,
+	if _, err := db.ExecContext(ctx,
 		`UPDATE workflow_task SET status=?, error_msg=?, updated_at=? WHERE task_id=?`,
-		status, errMsg, now, task.TaskID)
+		status, errMsg, now, task.TaskID); err != nil {
+		logger := logging.FromContext(ctx)
+		if logger != nil {
+			logger.Error(logging.ErrDatabaseError, "setStatus(%s -> %s) failed: task=%s err=%v",
+				task.TaskID, status, task.TaskID, err)
+		}
+	}
 }
 
 func updateStepProgress(ctx context.Context, db *sql.DB, task *WorkflowTask, step string, retry int) {
@@ -161,9 +169,15 @@ func updateStepProgress(ctx context.Context, db *sql.DB, task *WorkflowTask, ste
 	task.CurrentStep = step
 	task.StepRetry = retry
 	task.StepUpdatedAt = now
-	db.ExecContext(ctx,
+	if _, err := db.ExecContext(ctx,
 		`UPDATE workflow_task SET current_step=?, step_retry=?, step_updated_at=? WHERE task_id=?`,
-		step, retry, now, task.TaskID)
+		step, retry, now, task.TaskID); err != nil {
+		logger := logging.FromContext(ctx)
+		if logger != nil {
+			logger.Error(logging.ErrDatabaseError, "updateStepProgress(%s) failed: task=%s step=%s err=%v",
+				task.TaskID, task.TaskID, step, err)
+		}
+	}
 }
 
 func setStepResult(ctx context.Context, db *sql.DB, task *WorkflowTask, nextStatus, completedStep string) {
@@ -171,17 +185,29 @@ func setStepResult(ctx context.Context, db *sql.DB, task *WorkflowTask, nextStat
 	task.Status = nextStatus
 	task.CurrentStep = completedStep
 	task.StepRetry = 0
-	db.ExecContext(ctx,
+	if _, err := db.ExecContext(ctx,
 		`UPDATE workflow_task SET status=?, current_step=?, step_retry=0, step_updated_at=? WHERE task_id=?`,
-		nextStatus, completedStep, now, task.TaskID)
+		nextStatus, completedStep, now, task.TaskID); err != nil {
+		logger := logging.FromContext(ctx)
+		if logger != nil {
+			logger.Error(logging.ErrDatabaseError, "setStepResult(%s -> %s) failed: task=%s err=%v",
+				task.TaskID, nextStatus, task.TaskID, err)
+		}
+	}
 }
 
 func setPublishResults(ctx context.Context, db *sql.DB, task *WorkflowTask, nextStatus string) {
 	data, _ := json.Marshal(task.PublishResults)
 	now := time.Now().UTC()
-	db.ExecContext(ctx,
+	if _, err := db.ExecContext(ctx,
 		`UPDATE workflow_task SET status=?, publish_results=?, current_step='publishing', step_retry=0, step_updated_at=? WHERE task_id=?`,
-		nextStatus, string(data), now, task.TaskID)
+		nextStatus, string(data), now, task.TaskID); err != nil {
+		logger := logging.FromContext(ctx)
+		if logger != nil {
+			logger.Error(logging.ErrDatabaseError, "setPublishResults(%s -> %s) failed: task=%s err=%v",
+				task.TaskID, nextStatus, task.TaskID, err)
+		}
+	}
 }
 
 func insertTask(ctx context.Context, db *sql.DB, task *WorkflowTask) error {
@@ -191,13 +217,13 @@ func insertTask(ctx context.Context, db *sql.DB, task *WorkflowTask) error {
 	_, err := db.ExecContext(ctx,
 		`INSERT INTO workflow_task
 			(task_id, uid, skill_id, topic, novel_name, title, volume_name, chapter_number,
-			 platform, status, session_id, draft_version,
+			 platform, status, session_id, draft_version, draft_hash,
 			 md_path, trace_id, publish_results, accounts, current_step, step_retry, step_updated_at, error_msg)
-		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?)`,
+		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?)`,
 		task.TaskID, task.UID, task.SkillID, task.Topic,
 		task.NovelName, task.Title, task.VolumeName, task.ChapterNumber,
 		task.Platform, task.Status,
-		task.SessionID, task.DraftVersion, task.MDPath, task.TraceID,
+		task.SessionID, task.DraftVersion, task.DraftHash, task.MDPath, task.TraceID,
 		string(data), string(accountsJSON), task.CurrentStep, now, task.ErrorMsg)
 	return err
 }
@@ -205,20 +231,25 @@ func insertTask(ctx context.Context, db *sql.DB, task *WorkflowTask) error {
 func loadTask(ctx context.Context, db *sql.DB, taskID string) (*WorkflowTask, error) {
 	row := db.QueryRowContext(ctx,
 		`SELECT task_id, uid, skill_id, topic, novel_name, title, volume_name, chapter_number,
-		        platform, status, session_id, draft_version,
+		        platform, status, session_id, draft_version, draft_hash,
 		        md_path, trace_id, publish_results, accounts,
-		        current_step, step_retry, step_updated_at, error_msg
+		        current_step, step_retry, step_updated_at, error_msg,
+		        created_at, updated_at
 		 FROM workflow_task WHERE task_id=?`, taskID)
 
 	var task WorkflowTask
 	var resultsJSON string
 	var accountsJSON string
 	var stepUpdatedAt time.Time
+	var createdAt time.Time
+	var updatedAt time.Time
+	var draftHash sql.NullString
 	err := row.Scan(&task.TaskID, &task.UID, &task.SkillID, &task.Topic,
 		&task.NovelName, &task.Title, &task.VolumeName, &task.ChapterNumber,
-		&task.Platform, &task.Status, &task.SessionID, &task.DraftVersion,
+		&task.Platform, &task.Status, &task.SessionID, &task.DraftVersion, &draftHash,
 		&task.MDPath, &task.TraceID, &resultsJSON, &accountsJSON,
-		&task.CurrentStep, &task.StepRetry, &stepUpdatedAt, &task.ErrorMsg)
+		&task.CurrentStep, &task.StepRetry, &stepUpdatedAt, &task.ErrorMsg,
+		&createdAt, &updatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -226,6 +257,11 @@ func loadTask(ctx context.Context, db *sql.DB, taskID string) (*WorkflowTask, er
 		return nil, err
 	}
 	task.StepUpdatedAt = stepUpdatedAt
+	task.CreatedAt = createdAt
+	task.UpdatedAt = updatedAt
+	if draftHash.Valid {
+		task.DraftHash = draftHash.String
+	}
 	if resultsJSON != "" {
 		json.Unmarshal([]byte(resultsJSON), &task.PublishResults)
 	}

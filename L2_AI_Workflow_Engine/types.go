@@ -84,6 +84,7 @@ type WorkflowTask struct {
 	Status         string          `json:"status"`
 	SessionID      string          `json:"sessionId"`
 	DraftVersion   int             `json:"draftVersion"`
+	DraftHash      string          `json:"draftHash"`
 	MDPath         string          `json:"mdPath"`
 	TraceID        string          `json:"traceId"`
 	PublishResults []PublishResult `json:"publishResults"`
@@ -96,6 +97,8 @@ type WorkflowTask struct {
 	Title          string          `json:"title"`
 	VolumeName     string          `json:"volumeName"`
 	ChapterNumber  int             `json:"chapterNumber"`
+	CreatedAt      time.Time       `json:"createdAt"`
+	UpdatedAt      time.Time       `json:"updatedAt"`
 }
 
 type WSEvent struct {
@@ -107,38 +110,40 @@ type WSEvent struct {
 }
 
 type MDWriteRequest struct {
-	TaskID         string          `json:"taskId"`
-	UID            string          `json:"uid"`
-	SkillID        string          `json:"skillId"`
-	SkillName      string          `json:"skillName"`
-	Model          string          `json:"model"`
-	Topic          string          `json:"topic"`
-	NovelName      string          `json:"novelName"`
-	VolumeName     string          `json:"volumeName"`
-	Title          string          `json:"title"`
-	ChapterNumber  int             `json:"chapterNumber"`
-	Platform       string          `json:"platform"`
-	SessionID      string          `json:"sessionId"`
-	Sessions       []SessionInfo   `json:"sessions"`
-	DraftVersion   int             `json:"draftVersion"`
-	PublishResults []PublishResult `json:"publishResults"`
-	Products       Products        `json:"products"`
-	EpisodeIDs     []string        `json:"episodeIds"`
-	TraceID        string          `json:"traceId"`
-	CreatedAt      time.Time       `json:"createdAt"`
+	TaskID                string          `json:"taskId"`
+	UID                   string          `json:"uid"`
+	SkillID               string          `json:"skillId"`
+	SkillName             string          `json:"skillName"`
+	Model                 string          `json:"model"`
+	Topic                 string          `json:"topic"`
+	NovelName             string          `json:"novelName"`
+	VolumeName            string          `json:"volumeName"`
+	Title                 string          `json:"title"`
+	ChapterNumber         int             `json:"chapterNumber"`
+	PublishedChapterCount int             `json:"publishedChapterCount"`
+	Platform              string          `json:"platform"`
+	SessionID             string          `json:"sessionId"`
+	Sessions              []SessionInfo   `json:"sessions"`
+	DraftVersion          int             `json:"draftVersion"`
+	PublishResults        []PublishResult `json:"publishResults"`
+	Products              Products        `json:"products"`
+	EpisodeIDs            []string        `json:"episodeIds"`
+	TraceID               string          `json:"traceId"`
+	CreatedAt             time.Time       `json:"createdAt"`
 }
 
 const (
-	StatusInit        = "init"
-	StatusFetchDraft  = "fetch_draft"
-	StatusPublishing  = "publishing"
-	StatusPublished   = "published"
-	StatusMDWriting   = "md_writing"
-	StatusMDWritten   = "md_written"
-	StatusDone        = "done"
-	StatusDonePartial = "done_partial"
-	StatusFailedGen   = "failed_gen"
-	StatusFailedMD    = "failed_md"
+	StatusInit            = "init"
+	StatusFetchDraft      = "fetch_draft"
+	StatusPublishing      = "publishing"
+	StatusPublished       = "published"
+	StatusMDWriting       = "md_writing"
+	StatusMDWritten       = "md_written"
+	StatusDone            = "done"
+	StatusDonePartial     = "done_partial"
+	StatusFailedGen       = "failed_gen"
+	StatusFailedMD        = "failed_md"
+	StatusPublishedFailed = "published_failed"
 )
 
 const (
@@ -148,7 +153,7 @@ const (
 
 func IsTerminal(status string) bool {
 	switch status {
-	case StatusDone, StatusDonePartial, StatusFailedGen, StatusFailedMD:
+	case StatusDone, StatusDonePartial, StatusFailedGen, StatusFailedMD, StatusPublishedFailed:
 		return true
 	}
 	return false

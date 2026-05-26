@@ -2,9 +2,11 @@ package workflow_engine
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"a4md"
+	"clawstudios/pkg/logging"
 )
 
 type RealMDWriterAdapter struct {
@@ -27,6 +29,15 @@ func NewRealMDWriterAdapter(storageDir string) (*RealMDWriterAdapter, error) {
 }
 
 func (a *RealMDWriterAdapter) WriteMD(ctx context.Context, req MDWriteRequest) (string, error) {
+	l := logging.FromContext(ctx)
+
+	if l != nil {
+		reqJSON, _ := json.Marshal(req)
+		l.Info("文档沉淀入参: task=%s novel=%s title=%s ch=%d skill=%s model=%s",
+			req.TaskID, req.NovelName, req.Title, req.ChapterNumber, req.SkillID, req.Model)
+		l.Info("文档沉淀详细信息: %s", string(reqJSON))
+	}
+
 	publishResults := make([]a4md.PublishResult, len(req.PublishResults))
 	for i, r := range req.PublishResults {
 		publishResults[i] = a4md.PublishResult{
@@ -75,26 +86,34 @@ func (a *RealMDWriterAdapter) WriteMD(ctx context.Context, req MDWriteRequest) (
 	}
 
 	result, err := a.service.WriteMD(ctx, a4md.WriteMDInput{
-		TaskID:         req.TaskID,
-		UID:            req.UID,
-		Topic:          req.Topic,
-		NovelName:      req.NovelName,
-		VolumeName:     req.VolumeName,
-		Title:          req.Title,
-		ChapterNumber:  req.ChapterNumber,
-		CreatedAt:      createdAt,
-		SkillID:        req.SkillID,
-		SkillName:      req.SkillName,
-		Model:          req.Model,
-		Sessions:       sessions,
-		DraftVersion:   req.DraftVersion,
-		Products:       products,
-		PublishResults: publishResults,
-		EpisodeIDs:     req.EpisodeIDs,
-		TraceID:        req.TraceID,
+		TaskID:                req.TaskID,
+		UID:                   req.UID,
+		Topic:                 req.Topic,
+		NovelName:             req.NovelName,
+		VolumeName:            req.VolumeName,
+		Title:                 req.Title,
+		ChapterNumber:         req.ChapterNumber,
+		PublishedChapterCount: req.PublishedChapterCount,
+		CreatedAt:             createdAt,
+		SkillID:               req.SkillID,
+		SkillName:             req.SkillName,
+		Model:                 req.Model,
+		Sessions:              sessions,
+		DraftVersion:          req.DraftVersion,
+		Products:              products,
+		PublishResults:        publishResults,
+		EpisodeIDs:            req.EpisodeIDs,
+		TraceID:               req.TraceID,
 	})
 	if err != nil {
+		if l != nil {
+			l.Error(logging.ErrWorkflowError, "文档沉淀写入失败: task=%s err=%v", req.TaskID, err)
+		}
 		return "", err
+	}
+
+	if l != nil {
+		l.Info("文档沉淀出参: task=%s mdPath=%s", req.TaskID, result.MDPath)
 	}
 	return result.MDPath, nil
 }

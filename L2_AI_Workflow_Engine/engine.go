@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"log"
 	"time"
+
+	"clawstudios/pkg/logging"
 )
 
 type Engine struct {
@@ -60,34 +62,72 @@ func (e *Engine) Execute(ctx context.Context, input PublishInput) error {
 }
 
 func (e *Engine) ExecuteAndGetTask(ctx context.Context, input PublishInput) (*WorkflowTask, error) {
+	l := logging.FromContext(ctx)
+
 	if err := validateInput(input); err != nil {
+		if l != nil {
+			l.Error(logging.ErrInvalidParam, "发布参数校验失败: %v", err)
+		}
 		return nil, err
+	}
+
+	if l != nil {
+		inJSON, _ := json.Marshal(input)
+		l.Info("发布请求入参: %s", string(inJSON))
 	}
 
 	task, isNew, err := e.upsertTask(ctx, input)
 	if err != nil {
+		if l != nil {
+			l.Error(logging.ErrDatabaseError, "创建/更新任务失败: %v", err)
+		}
 		return nil, err
 	}
 
+	oldStatus := task.Status
+
 	if task.Status == StatusDone && !isNew {
+		if l != nil {
+			l.Info("任务已完成,跳过重复发布: task=%s", task.TaskID)
+		}
 		return task, nil
 	}
 
-	// Allow re-publish for done_partial and failed statuses
-	if IsTerminal(task.Status) && !isNew && task.Status != StatusDonePartial && task.Status != StatusFailedGen && task.Status != StatusFailedMD {
+	if IsTerminal(task.Status) && !isNew && task.Status != StatusDonePartial && task.Status != StatusFailedGen && task.Status != StatusFailedMD && task.Status != StatusPublishedFailed {
 		return task, nil
 	}
 
-	// Reset for re-publish
-	if task.Status == StatusDonePartial || task.Status == StatusFailedGen || task.Status == StatusFailedMD {
-		task.Status = StatusPublishing
+	replayable := task.Status == StatusDonePartial || task.Status == StatusFailedGen || task.Status == StatusFailedMD || task.Status == StatusPublishedFailed
+	if task.Status == StatusPublishing && !isNew {
+		replayable = true
+	}
+	if replayable {
+		task.Status = StatusInit
 		task.PublishResults = nil
 		task.CurrentStep = ""
 		task.StepRetry = 0
+		task.DraftHash = ""
+		if l != nil {
+			l.Warn(logging.WarnRetryAttempt, "重试发布: task=%s 上次状态=%s 新session=%s", task.TaskID, oldStatus, task.SessionID)
+		}
+	}
+
+	if l != nil {
+		l.Info("开始执行发布流程: task=%s status=%s platform=%s accounts=%d",
+			task.TaskID, task.Status, task.Platform, len(task.Accounts))
 	}
 
 	if err := e.runStateMachine(ctx, task); err != nil {
+		if l != nil {
+			l.Error(logging.ErrWorkflowError, "发布流程执行失败: task=%s err=%v", task.TaskID, err)
+		}
 		return nil, err
+	}
+
+	if l != nil {
+		resJSON, _ := json.Marshal(task.PublishResults)
+		l.Info("发布会流程执行完成: task=%s 最终状态=%s 发布结果=%s",
+			task.TaskID, task.Status, string(resJSON))
 	}
 
 	return task, nil
@@ -99,7 +139,6 @@ func (e *Engine) upsertTask(ctx context.Context, input PublishInput) (*WorkflowT
 		return nil, false, err
 	}
 	if existing != nil {
-		// 刷新前端可能更新的字段
 		updated := false
 		if input.NovelName != "" && input.NovelName != existing.NovelName {
 			existing.NovelName = input.NovelName
@@ -121,11 +160,22 @@ func (e *Engine) upsertTask(ctx context.Context, input PublishInput) (*WorkflowT
 			existing.Accounts = input.Accounts
 			updated = true
 		}
+		if input.SessionID != "" && input.SessionID != existing.SessionID {
+			existing.SessionID = input.SessionID
+			existing.DraftHash = ""
+			updated = true
+		}
+		if input.DraftVersion != existing.DraftVersion {
+			existing.DraftVersion = input.DraftVersion
+			existing.DraftHash = ""
+			updated = true
+		}
 		if updated {
 			accountsJSON, _ := json.Marshal(existing.Accounts)
 			e.db.ExecContext(ctx,
-				`UPDATE workflow_task SET novel_name=?, title=?, volume_name=?, chapter_number=?, accounts=?, updated_at=NOW() WHERE task_id=?`,
-				existing.NovelName, existing.Title, existing.VolumeName, existing.ChapterNumber, string(accountsJSON), existing.TaskID)
+				`UPDATE workflow_task SET novel_name=?, title=?, volume_name=?, chapter_number=?, accounts=?, session_id=?, draft_version=?, draft_hash=?, updated_at=NOW() WHERE task_id=?`,
+				existing.NovelName, existing.Title, existing.VolumeName, existing.ChapterNumber, string(accountsJSON),
+				existing.SessionID, existing.DraftVersion, existing.DraftHash, existing.TaskID)
 		}
 		return existing, false, nil
 	}
@@ -167,9 +217,13 @@ func taskIDFromInput(input PublishInput) string {
 }
 
 func (e *Engine) runStateMachine(ctx context.Context, task *WorkflowTask) error {
+	l := logging.FromContext(ctx)
 	var draftContent string
+
 	for !IsTerminal(task.Status) {
-		log.Printf("[task=%s] step start: status=%s", task.TaskID, task.Status)
+		if l != nil {
+			l.Info("步骤开始: task=%s status=%s", task.TaskID, task.Status)
+		}
 		e.pushWS(task, task.Status, "running", "")
 
 		var next string
@@ -177,27 +231,58 @@ func (e *Engine) runStateMachine(ctx context.Context, task *WorkflowTask) error 
 
 		switch task.Status {
 		case StatusInit, StatusFetchDraft:
+			if l != nil {
+				l.Info("获取草稿: task=%s session=%s draftVersion=%d", task.TaskID, task.SessionID, task.DraftVersion)
+			}
 			next, draftContent, err = stepFetchDraft(ctx, task, e.draftFetcher, e.db)
+			if l != nil {
+				if err != nil {
+					l.Error(logging.ErrWorkflowError, "获取草稿失败: task=%s err=%v", task.TaskID, err)
+				} else {
+					l.Info("获取草稿成功: task=%s 草稿长度=%d 下一步=%s", task.TaskID, len(draftContent), next)
+				}
+			}
 
 		case StatusPublishing:
+			if l != nil {
+				l.Info("开始发布: task=%s platform=%s 账号数=%d", task.TaskID, task.Platform, len(task.Accounts))
+			}
 			if draftContent == "" {
 				draftContent, err = e.draftFetcher.Fetch(ctx, task.TaskID, task.SessionID, task.DraftVersion)
 				if err != nil {
-					log.Printf("[task=%s] step publish fetch draft error: %v", task.TaskID, err)
+					if l != nil {
+						l.Error(logging.ErrWorkflowError, "发布前获取草稿失败: task=%s err=%v", task.TaskID, err)
+					}
 					return err
 				}
 			}
 			next, err = stepPublishing(ctx, task, e.c1, e.db, draftContent)
+			if l != nil {
+				if err != nil {
+					l.Error(logging.ErrWorkflowError, "发布失败: task=%s err=%v", task.TaskID, err)
+				} else {
+					resultsJSON, _ := json.Marshal(task.PublishResults)
+					l.Info("发布完成: task=%s 结果=%s", task.TaskID, string(resultsJSON))
+				}
+			}
 
 		case StatusPublished:
+			if l != nil {
+				l.Info("发布完成,进入文档沉淀: task=%s", task.TaskID)
+			}
 			next = StatusMDWriting
 			setStatus(ctx, e.db, task, next, "")
 
 		case StatusMDWriting:
+			if l != nil {
+				l.Info("开始文档沉淀: task=%s novel=%s title=%s ch=%d", task.TaskID, task.NovelName, task.Title, task.ChapterNumber)
+			}
 			if draftContent == "" {
 				draftContent, err = e.draftFetcher.Fetch(ctx, task.TaskID, task.SessionID, task.DraftVersion)
 				if err != nil {
-					log.Printf("[task=%s] step md write fetch draft error: %v", task.TaskID, err)
+					if l != nil {
+						l.Error(logging.ErrWorkflowError, "文档沉淀前获取草稿失败: task=%s err=%v", task.TaskID, err)
+					}
 					return err
 				}
 			}
@@ -211,13 +296,26 @@ func (e *Engine) runStateMachine(ctx context.Context, task *WorkflowTask) error 
 				}
 			}
 			next, err = stepMDWriting(ctx, task, e.a4, e.db, draftContent)
+			if l != nil {
+				if err != nil {
+					l.Error(logging.ErrWorkflowError, "文档沉淀失败: task=%s err=%v", task.TaskID, err)
+				} else {
+					l.Info("文档沉淀完成: task=%s md路径=%s", task.TaskID, task.MDPath)
+				}
+			}
 
 		case StatusMDWritten:
 			next = resolveFinalStatus(task)
 			setStatus(ctx, e.db, task, next, "")
 			e.pushWS(task, next, "success", "完成")
+			if l != nil {
+				l.Info("全部流程完成: task=%s 最终状态=%s", task.TaskID, next)
+			}
 
 		default:
+			if l != nil {
+				l.Error(logging.ErrWorkflowError, "未知状态: task=%s status=%s", task.TaskID, task.Status)
+			}
 			log.Printf("[task=%s] unknown status: %s", task.TaskID, task.Status)
 			return fmt.Errorf("unknown status: %s", task.Status)
 		}
@@ -226,8 +324,10 @@ func (e *Engine) runStateMachine(ctx context.Context, task *WorkflowTask) error 
 			log.Printf("[task=%s] step error: status=%s, next=%s, err=%v", task.TaskID, task.Status, next, err)
 			return err
 		}
-		log.Printf("[task=%s] step done: status=%s -> next=%s", task.TaskID, task.Status, next)
 		task.Status = next
+	}
+	if l != nil {
+		l.Info("状态机结束: task=%s 最终状态=%s", task.TaskID, task.Status)
 	}
 	log.Printf("[task=%s] state machine finished: status=%s", task.TaskID, task.Status)
 	return nil
@@ -235,12 +335,17 @@ func (e *Engine) runStateMachine(ctx context.Context, task *WorkflowTask) error 
 
 // Replay 重放失败或部分成功的任务
 func (e *Engine) Replay(ctx context.Context, taskID string) error {
+	l := logging.FromContext(ctx)
 	task, err := loadTask(ctx, e.db, taskID)
 	if err != nil {
 		return err
 	}
 	if task == nil {
 		return fmt.Errorf("task %s not found", taskID)
+	}
+
+	if l != nil {
+		l.Info("replay started: task=%s from_status=%s", taskID, task.Status)
 	}
 
 	switch task.Status {
@@ -262,18 +367,32 @@ func (e *Engine) Replay(ctx context.Context, taskID string) error {
 		updateStepProgress(ctx, e.db, task, "", 0)
 		return e.runStateMachine(ctx, task)
 
+	case StatusPublishedFailed:
+		setStatus(ctx, e.db, task, StatusInit, "replay from published_failed")
+		task.PublishResults = nil
+		task.DraftHash = ""
+		task.StepRetry = 0
+		updateStepProgress(ctx, e.db, task, "", 0)
+		return e.runStateMachine(ctx, task)
+
 	default:
 		return fmt.Errorf("task %s is not replayable (status=%s)", taskID, task.Status)
 	}
 }
 
+func (e *Engine) GetTask(ctx context.Context, taskID string) (*WorkflowTask, error) {
+	return loadTask(ctx, e.db, taskID)
+}
+
 // RecoverAll 启动时扫描所有非终态任务并恢复
 func (e *Engine) RecoverAll(ctx context.Context) error {
+	logger := logging.NewLogger("WorkflowEngineRecover")
 	rows, err := e.db.QueryContext(ctx,
 		`SELECT task_id, uid, skill_id, topic, novel_name, title, volume_name, chapter_number,
-		        platform, status, session_id, draft_version,
+		        platform, status, session_id, draft_version, draft_hash,
 		        md_path, trace_id, publish_results, accounts,
-		        current_step, step_retry, step_updated_at, error_msg
+		        current_step, step_retry, step_updated_at, error_msg,
+		        created_at, updated_at
 		 FROM workflow_task
 		 WHERE status IN ('init','fetch_draft','publishing','published','md_writing','md_written')
 		 ORDER BY created_at ASC`)
@@ -288,26 +407,36 @@ func (e *Engine) RecoverAll(ctx context.Context) error {
 		var resultsJSON string
 		var accountsJSON string
 		var stepUpdatedAt time.Time
+		var createdAt time.Time
+		var updatedAt time.Time
+		var draftHash sql.NullString
 		if err := rows.Scan(&task.TaskID, &task.UID, &task.SkillID, &task.Topic,
 			&task.NovelName, &task.Title, &task.VolumeName, &task.ChapterNumber,
-			&task.Platform, &task.Status, &task.SessionID, &task.DraftVersion,
+			&task.Platform, &task.Status, &task.SessionID, &task.DraftVersion, &draftHash,
 			&task.MDPath, &task.TraceID, &resultsJSON, &accountsJSON,
-			&task.CurrentStep, &task.StepRetry, &stepUpdatedAt, &task.ErrorMsg); err != nil {
-			log.Printf("recover scan error: %v", err)
+			&task.CurrentStep, &task.StepRetry, &stepUpdatedAt, &task.ErrorMsg,
+			&createdAt, &updatedAt); err != nil {
+			logger.Error(logging.ErrDatabaseError, "recover scan error: err=%v", err)
 			continue
 		}
 		task.StepUpdatedAt = stepUpdatedAt
+		task.CreatedAt = createdAt
+		task.UpdatedAt = updatedAt
+		if draftHash.Valid {
+			task.DraftHash = draftHash.String
+		}
 		if resultsJSON != "" {
 			json.Unmarshal([]byte(resultsJSON), &task.PublishResults)
 		}
 		if accountsJSON != "" {
 			json.Unmarshal([]byte(accountsJSON), &task.Accounts)
 		}
-		log.Printf("recovering task %s (status=%s)", task.TaskID, task.Status)
+		logger.Info("recovering task: task=%s status=%s session=%s", task.TaskID, task.Status, task.SessionID)
 		e.runStateMachine(ctx, &task)
 		count++
 	}
 
-	log.Printf("recovered %d pending tasks", count)
+	logger.Info("recovery complete: recovered %d pending tasks", count)
+	logger.Close()
 	return nil
 }

@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"clawstudios/pkg/logging"
 )
 
 func stepFetchDraft(ctx context.Context, task *WorkflowTask, fetcher DraftFetcher, db *sql.DB) (nextStatus string, draftContent string, err error) {
@@ -30,8 +32,9 @@ func stepFetchDraft(ctx context.Context, task *WorkflowTask, fetcher DraftFetche
 }
 
 func stepPublishing(ctx context.Context, task *WorkflowTask, c1 C1Publisher, db *sql.DB, draftContent string) (string, error) {
+	l := logging.FromContext(ctx)
+
 	if task.CurrentStep == StatusPublishing && len(task.PublishResults) > 0 {
-		// Only skip if at least one publish succeeded; if all failed, retry
 		allFailed := true
 		for _, r := range task.PublishResults {
 			if r.Status == "ok" {
@@ -42,7 +45,6 @@ func stepPublishing(ctx context.Context, task *WorkflowTask, c1 C1Publisher, db 
 		if !allFailed {
 			return StatusPublished, nil
 		}
-		// All failed: clear results and retry
 		task.PublishResults = nil
 		task.CurrentStep = ""
 	}
@@ -59,17 +61,46 @@ func stepPublishing(ctx context.Context, task *WorkflowTask, c1 C1Publisher, db 
 		realAdapter.TraceID = task.TraceID
 	}
 
+	product := ProductContent{
+		Text:          stripMarkdown(draftContent),
+		NovelName:     task.NovelName,
+		Title:         task.Title,
+		VolumeName:    task.VolumeName,
+		ChapterNumber: task.ChapterNumber,
+	}
+
 	results, err := c1.Publish(ctx, map[string]ProductContent{
-		task.Platform: {
-			Text:          stripMarkdown(draftContent),
-			NovelName:     task.NovelName,
-			Title:         task.Title,
-			VolumeName:    task.VolumeName,
-			ChapterNumber: task.ChapterNumber,
-		},
+		task.Platform: product,
 	}, task.Accounts)
 	if err != nil {
+		if l != nil {
+			l.Error(logging.ErrWorkflowError, "发布调用失败: task=%s platform=%s err=%v", task.TaskID, task.Platform, err)
+		}
 		return StatusPublishing, err
+	}
+
+	for _, r := range results {
+		if l != nil {
+			if r.Status == "ok" {
+				l.Info("账号发布成功: account=%s platform=%s postID=%s session=%s ch=%d",
+					r.AccountID, r.Platform, r.PostID, task.SessionID, task.ChapterNumber)
+			} else {
+				l.Warn(logging.ErrWorkflowError, "账号发布失败: account=%s platform=%s status=%s errorCode=%s display=%s",
+					r.AccountID, r.Platform, r.Status, r.ErrorCode, r.MaskedDisplay)
+			}
+		}
+	}
+
+	allFailed := true
+	for _, r := range results {
+		if r.Status == "ok" {
+			allFailed = false
+			break
+		}
+	}
+	if allFailed {
+		setStatus(ctx, db, task, StatusPublishedFailed, "all accounts failed to publish")
+		return StatusPublishedFailed, nil
 	}
 
 	task.PublishResults = results
@@ -78,11 +109,16 @@ func stepPublishing(ctx context.Context, task *WorkflowTask, c1 C1Publisher, db 
 }
 
 func stepMDWriting(ctx context.Context, task *WorkflowTask, a4 MDWriter, db *sql.DB, draftContent string) (string, error) {
+	l := logging.FromContext(ctx)
+
 	if task.MDPath != "" {
 		return StatusMDWritten, nil
 	}
 
 	if task.StepRetry >= MaxRetriesMDWriting {
+		if l != nil {
+			l.Error(logging.ErrWorkflowError, "文档沉淀重试耗尽: task=%s retries=%d", task.TaskID, task.StepRetry)
+		}
 		setStatus(ctx, db, task, StatusFailedMD, "a4 write md failed")
 		return StatusFailedMD, nil
 	}
@@ -92,23 +128,35 @@ func stepMDWriting(ctx context.Context, task *WorkflowTask, a4 MDWriter, db *sql
 
 	updateStepProgress(ctx, db, task, StatusMDWriting, task.StepRetry+1)
 
+	var publishedCount int
+	if task.NovelName != "" {
+		db.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM workflow_task WHERE novel_name = ? AND status IN ('done', 'done_partial')`,
+			task.NovelName).Scan(&publishedCount)
+	}
+	publishedCount++
+
 	mdPath, err := a4.WriteMD(ctx, MDWriteRequest{
-		TaskID:         task.TaskID,
-		UID:            task.UID,
-		SkillID:        task.SkillID,
-		SkillName:      task.SkillName,
-		Model:          task.Model,
-		Topic:          task.Topic,
-		NovelName:      task.NovelName,
-		VolumeName:     task.VolumeName,
-		Title:          task.Title,
-		ChapterNumber:  task.ChapterNumber,
-		SessionID:      task.SessionID,
-		DraftVersion:   task.DraftVersion,
-		PublishResults: task.PublishResults,
-		TraceID:        task.TraceID,
+		TaskID:                task.TaskID,
+		UID:                   task.UID,
+		SkillID:               task.SkillID,
+		SkillName:             task.SkillName,
+		Model:                 task.Model,
+		Topic:                 task.Topic,
+		NovelName:             task.NovelName,
+		VolumeName:            task.VolumeName,
+		Title:                 task.Title,
+		ChapterNumber:         task.ChapterNumber,
+		PublishedChapterCount: publishedCount,
+		SessionID:             task.SessionID,
+		DraftVersion:          task.DraftVersion,
+		PublishResults:        task.PublishResults,
+		TraceID:               task.TraceID,
 	})
 	if err != nil {
+		if l != nil {
+			l.Error(logging.ErrWorkflowError, "文档沉淀写入失败: task=%s retry=%d err=%v", task.TaskID, task.StepRetry, err)
+		}
 		return task.Status, nil
 	}
 
