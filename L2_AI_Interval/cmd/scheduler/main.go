@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/robfig/cron/v3"
@@ -18,6 +19,7 @@ import (
 	"claw_studios/L2_AI_Interval/internal/cycle"
 	"claw_studios/L2_AI_Interval/internal/health"
 	"claw_studios/L2_AI_Interval/internal/metrics"
+	"clawstudios/pkg/logging"
 )
 
 func main() {
@@ -33,7 +35,7 @@ func main() {
 	defer db.Close()
 
 	var statsAdapter adapter.StatsAdapter
-	if os.Getenv("SCHEDULER_USE_MOCK") == "true" || os.Getenv("SCHEDULER_USE_MOCK") == "" {
+	if os.Getenv("SCHEDULER_USE_MOCK") == "true" {
 		statsAdapter = adapter.NewMockAdapter()
 		log.Println("[scheduler] using MockStatsAdapter")
 	} else {
@@ -51,9 +53,13 @@ func main() {
 
 	metrics.Register()
 
+	shutdownCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	c := cron.New()
 	c.AddFunc(cfg.Scheduler.CronExpr, func() {
-		if err := runner.Run(context.Background()); err != nil {
+		log.Println("[scheduler] cycle started")
+		if err := runner.Run(shutdownCtx); err != nil {
 			log.Printf("[scheduler] cycle error: %v", err)
 		}
 	})
@@ -66,8 +72,8 @@ func main() {
 	addr := fmt.Sprintf(":%d", cfg.Scheduler.ListenPort)
 	go func() {
 		log.Printf("[scheduler] http listening on %s", addr)
-		if err := http.ListenAndServe(addr, mux); err != nil {
-			log.Fatalf("http server: %v", err)
+		if err := http.ListenAndServe(addr, logging.HTTPMiddleware("Interval")(mux)); err != nil {
+			log.Printf("[scheduler] http server: %v", err)
 		}
 	}()
 
@@ -75,5 +81,10 @@ func main() {
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 	<-sig
 	log.Println("[scheduler] shutting down")
+	cancel()
 	c.Stop()
+
+	ctx, timeout := context.WithTimeout(context.Background(), 10*time.Second)
+	defer timeout()
+	<-ctx.Done()
 }

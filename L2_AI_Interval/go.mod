@@ -13,6 +13,7 @@ require (
 require (
 	L0_AI_Account_Secret_Vault v0.0.0
 	clawstudios/l1_ai_releaser v0.0.0
+	clawstudios/pkg/logging v0.0.0
 	filippo.io/edwards25519 v1.2.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
@@ -27,3 +28,5 @@ require (
 replace clawstudios/l1_ai_releaser => /home/zmp/claw_studios/L1_AI_Releaser
 
 replace L0_AI_Account_Secret_Vault => /home/zmp/claw_studios/L0_AI_Account_Secret_Vault
+
+replace clawstudios/pkg/logging => /home/claw_studios/code/pkg/logging

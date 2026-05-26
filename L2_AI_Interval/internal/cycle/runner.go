@@ -9,6 +9,7 @@ import (
 
 	"claw_studios/L2_AI_Interval/internal/adapter"
 	"claw_studios/L2_AI_Interval/internal/metrics"
+	"clawstudios/pkg/logging"
 )
 
 type Runner struct {
@@ -30,14 +31,15 @@ func NewRunner(db *sql.DB, adp adapter.StatsAdapter, cfg Config) *Runner {
 }
 
 func (r *Runner) Run(ctx context.Context) error {
+	logger := logging.NewLogger("IntervalCycle", logging.WithTaskID("scheduler_cycle"))
 	cycleStart := time.Now().Truncate(time.Minute)
-	log.Printf("[scheduler] cycle start, snapshot_at=%s", cycleStart.Format(time.RFC3339))
+	logger.Info("cycle start: snapshot_at=%s", cycleStart.Format(time.RFC3339))
 
 	posts, err := r.fetchPosts(ctx)
 	if err != nil {
 		return fmt.Errorf("fetch posts: %w", err)
 	}
-	log.Printf("[scheduler] found %d posts to pull", len(posts))
+	logger.Info("found %d posts to pull", len(posts))
 
 	var pulled, failed int
 	for i := 0; i < len(posts); i += r.cfg.BatchSize {
@@ -49,7 +51,7 @@ func (r *Runner) Run(ctx context.Context) error {
 
 		for _, p := range batch {
 			if err := r.pullOne(ctx, p, cycleStart); err != nil {
-				log.Printf("[scheduler] pull failed post_id=%s platform=%s err=%v", p.PostID, p.Platform, err)
+				logger.Warn(logging.WarnServiceDegraded, "pull failed: post_id=%s platform=%s err=%v", p.PostID, p.Platform, err)
 				metrics.StatsPullFailTotal.WithLabelValues(p.Platform, "fetch_error").Inc()
 				failed++
 				continue
@@ -68,8 +70,9 @@ func (r *Runner) Run(ctx context.Context) error {
 
 	metrics.SchedulerCycleTotal.Inc()
 	metrics.SchedulerLastSuccessTimestamp.Set(float64(time.Now().Unix()))
-	log.Printf("[scheduler] cycle done, pulled=%d failed=%d duration=%s",
+	logger.Info("cycle done: pulled=%d failed=%d duration=%s",
 		pulled, failed, time.Since(cycleStart))
+	logger.Close()
 	return nil
 }
 
