@@ -9,24 +9,25 @@ import (
 // WriteMDInput 首次生成 MD 的输入
 // 来源：Workflow Engine（按 §4.5 契约）
 type WriteMDInput struct {
-	TaskID         string          // 任务 ID，如 task_xxx
-	UID            string          // 用户 ID
-	Topic          string          // 任务主题
-	NovelName      string          // 小说书名
-	VolumeName     string          // 分卷名
-	Title          string          // 章节标题
-	ChapterNumber  int             // 章节号
-	CreatedAt      time.Time       // 任务创建时间（ISO8601 UTC）
-	SkillID        string          // 使用的 Skill ID（如 xhs_grass_v1）
-	SkillName      string          // 使用的 Skill 名称
-	SkillVersion   string          // 使用的 Skill 版本
-	Model          string          // 使用的 Model（如 deepseek-chat）
-	Sessions       []SessionInfo   // 关联的 session 清单
-	DraftVersion   int             // 最终选用的 draft 版本号
-	Products       Products        // 最终产物内容
-	PublishResults []PublishResult // 发布结果
-	EpisodeIDs     []string        // episode ID 清单（按 ID 去 OSS 读摘要原文）
-	TraceID        string          // 全链路 trace ID
+	TaskID                string          // 任务 ID，如 task_xxx
+	UID                   string          // 用户 ID
+	Topic                 string          // 任务主题
+	NovelName             string          // 小说书名
+	VolumeName            string          // 分卷名
+	Title                 string          // 章节标题
+	ChapterNumber         int             // 章节号
+	PublishedChapterCount int             // 已发布章节总数（各卷章节数之和）
+	CreatedAt             time.Time       // 任务创建时间（ISO8601 UTC）
+	SkillID               string          // 使用的 Skill ID（如 xhs_grass_v1）
+	SkillName             string          // 使用的 Skill 名称
+	SkillVersion          string          // 使用的 Skill 版本
+	Model                 string          // 使用的 Model（如 deepseek-chat）
+	Sessions              []SessionInfo   // 关联的 session 清单
+	DraftVersion          int             // 最终选用的 draft 版本号
+	Products              Products        // 最终产物内容
+	PublishResults        []PublishResult // 发布结果
+	EpisodeIDs            []string        // episode ID 清单（按 ID 去 OSS 读摘要原文）
+	TraceID               string          // 全链路 trace ID
 }
 
 // SessionInfo 单个 session 的摘要信息
@@ -112,23 +113,24 @@ type StatsRepository interface {
 
 // TemplateData 传入 text/template 的顶层数据
 type TemplateData struct {
-	UID           string
-	Topic         string
-	NovelName     string
-	VolumeName    string
-	Title         string
-	ChapterNumber int
-	TaskID         string
-	CreatedAt      string // ISO8601 UTC 格式化后的字符串
-	SkillID        string
-	SkillName      string
-	SkillVersion   string
-	Model          string
-	DraftVersion   int
-	Sessions       []TemplateSession
-	Products       TemplateProducts
-	PublishResults []TemplatePublishResult
-	StatsGroups    []TemplateStatsGroup // nil 表示不输出数据反馈段
+	UID                   string
+	Topic                 string
+	NovelName             string
+	VolumeName            string
+	Title                 string
+	ChapterNumber         int
+	PublishedChapterCount int
+	TaskID                string
+	CreatedAt             string // ISO8601 UTC 格式化后的字符串
+	SkillID               string
+	SkillName             string
+	SkillVersion          string
+	Model                 string
+	DraftVersion          int
+	Sessions              []TemplateSession
+	Products              TemplateProducts
+	PublishResults        []TemplatePublishResult
+	StatsGroups           []TemplateStatsGroup // nil 表示不输出数据反馈段
 }
 
 type TemplateSession struct {
