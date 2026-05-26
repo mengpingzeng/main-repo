@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"ai_provider/config"
+	"clawstudios/pkg/logging"
 )
 
 // Server 是 AI Provider 的 HTTP 服务端
@@ -39,7 +40,7 @@ func (s *Server) registerRoutes() {
 func (s *Server) Start() error {
 	addr := fmt.Sprintf(":%d", s.port)
 	log.Printf("AI Provider HTTP server listening on %s", addr)
-	return http.ListenAndServe(addr, corsMiddleware(s.mux))
+	return http.ListenAndServe(addr, logging.HTTPMiddleware("AIProvider")(corsMiddleware(s.mux)))
 }
 
 func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
@@ -70,6 +71,7 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetModel(w http.ResponseWriter, r *http.Request) {
+	logger := logging.FromContext(r.Context())
 	if r.Method != http.MethodGet {
 		writeError(w, 405, "method not allowed")
 		return
@@ -84,6 +86,9 @@ func (s *Server) handleGetModel(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if logger != nil {
+		logger.Error(logging.ErrNotFound, "model not found: %s", modelID)
+	}
 	writeError(w, 404, "model not found: "+modelID)
 }
 
