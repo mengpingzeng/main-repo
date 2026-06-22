@@ -272,10 +272,6 @@ export GOPROXY=https://goproxy.cn,direct
 
 ## 构建docker部署镜像
 
-### 【准备】在开发环境中安装docker
-
-TODO
-
 ### 构建镜像
 
 - 1.在构建镜像之前准备好以下文件：
@@ -286,13 +282,37 @@ TODO
   ```
   python3 build_docker_image.py --api-key=<XXX>
   ```
-  > 执行以后生成镜像：zwf:<时间戳>
+  > 执行以后生成镜像：crpi-o1vsdbpms95lywf7.cn-shenzhen.personal.cr.aliyuncs.com/cszwf/zwf:<时间戳>
   
-- 3.【TODO】发布镜像
+### 发布镜像
+
+- 登录阿里云 Container Registry
+```
+docker login --username=lee_kenlao crpi-o1vsdbpms95lywf7.cn-shenzhen.personal.cr.aliyuncs.com
+```
+
+- 将镜像推送到Registry
+```
+docker tag [ImageId] crpi-o1vsdbpms95lywf7.cn-shenzhen.personal.cr.aliyuncs.com/cszwf/zwf:[镜像版本号]
+docker push crpi-o1vsdbpms95lywf7.cn-shenzhen.personal.cr.aliyuncs.com/cszwf/zwf:[镜像版本号]
+```
 
 ### 部署镜像
 
 - 1.将`docker/docker-compose.yml`拷贝到部署环境中
-- 2.【TODO】拉取对应的镜像
+- 2.从Registry中拉取镜像
+  ```
+  docker pull crpi-o1vsdbpms95lywf7.cn-shenzhen.personal.cr.aliyuncs.com/cszwf/zwf:[镜像版本号]
+  ```
 - 3.执行`docker compose up`
 
+### 调试容器
+
+- 查看容器
+  ```
+  docker ps -a
+  ```
+- 进入容器
+  ```
+  docker exec -it 容器名/容器ID bash
+  ```

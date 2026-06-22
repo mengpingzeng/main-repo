@@ -15,3 +15,7 @@ L3_AI_BFF/L3_AI_BFF
 # Novel shadow fixtures (data files, will grow large)
 L1_skills_register/fixtures/*shadow
 L1_skills_register/fixtures/*shadow/
+
+# docker
+docker/L1_AI_Provider.keys.json
+docker/L1_novel_skill.config.json

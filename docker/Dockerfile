@@ -78,6 +78,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     MYSQL_ROOT_USER=root \
     MYSQL_ROOT_PASSWORD=claw123 \
     A1_DB_DSN="xlongxia:Xlongxia_123@tcp(127.0.0.1:3306)/xlongxia?parseTime=true" \
+    A1_DB_PASSWORD="Xlongxia_123" \
     C2_DB_DSN="xlongxia:Xlongxia_123@tcp(127.0.0.1:3306)/xlongxia?parseTime=true" \
     WF_DB_DSN="xlongxia:Xlongxia_123@tcp(127.0.0.1:3306)/xlongxia?parseTime=true" \
     DB_DSN="root:claw123@tcp(127.0.0.1:3306)/claw_studios?parseTime=true&charset=utf8mb4" \
@@ -125,6 +126,7 @@ COPY --from=build /app/L2_AI_Workflow_Engine/workflow_engine        /app/L2_AI_W
 COPY --from=build /app/L1_AI_Dashboard/c2_dashboard                 /app/L1_AI_Dashboard/c2_dashboard
 COPY --from=build /app/L2_AI_Interval/scheduler                     /app/L2_AI_Interval/scheduler
 COPY --from=build /app/L3_AI_BFF/bff-server                         /app/L3_AI_BFF/bff-server
+COPY --from=build /app/L3_AI_BFF/config                            /app/L3_AI_BFF/config
 COPY --from=build /app/L1_novel_cover_png/novelcover_pure           /app/L1_novel_cover_png/novelcover_pure
 
 # ---------- 复制前端构建产物 ----------
@@ -132,6 +134,7 @@ COPY --from=build /app/Front_design/.next           /app/Front_design/.next
 COPY --from=build /app/Front_design/node_modules     /app/Front_design/node_modules
 COPY --from=build /app/Front_design/package.json     /app/Front_design/package.json
 COPY --from=build /app/Front_design/next.config.ts   /app/Front_design/next.config.ts
+COPY --from=build /app/Front_design/next.dev-origins.ts   /app/Front_design/next.dev-origins.ts
 # COPY --from=build /app/Front_design/.env.local       /app/Front_design/.env.local
 COPY --from=build /app/Front_design/public           /app/Front_design/public
 

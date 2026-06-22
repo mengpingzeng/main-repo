@@ -41,20 +41,36 @@ CONFEOF
 start_mysql() {
     log "启动 MySQL..."
 
+    local MYSQL_SOCKET="/var/run/mysqld/mysqld.sock"
+    local MYSQL_PASS="${MYSQL_ROOT_PASSWORD:-claw123}"
+
+    # 确保 MySQL socket 目录存在并修正权限
+    mkdir -p /var/run/mysqld
+    chown -R mysql:mysql /var/run/mysqld
+
+    # 修正 volume mount 数据目录的权限
+    chown -R mysql:mysql /var/lib/mysql
+    chmod 1777 /tmp
+
     # 确保 MySQL 数据目录存在
     if [ ! -d /var/lib/mysql/mysql ]; then
         warn "MySQL 数据目录未初始化，正在初始化..."
-        mysqld --initialize-insecure --user=mysql 2>&1 || true
+        if mysqld --initialize-insecure --user=mysql --datadir=/var/lib/mysql 2>&1; then
+            ok "MySQL 数据目录初始化完成"
+        else
+            fail "MySQL 初始化失败"
+            return 1
+        fi
     fi
 
-    # 启动 mysqld
-    mysqld --user=mysql --datadir=/var/lib/mysql &
+    # 启动 mysqld（显式指定 socket）
+    mysqld --user=mysql --datadir=/var/lib/mysql --socket="$MYSQL_SOCKET" &
     local mysql_pid=$!
 
     # 等待 MySQL 就绪
     local retries=30
     while [ $retries -gt 0 ]; do
-        if mysqladmin ping -u root --silent 2>/dev/null; then
+        if mysqladmin ping -u root --socket="$MYSQL_SOCKET" --silent 2>/dev/null; then
             ok "MySQL 已启动 (pid=$mysql_pid)"
             break
         fi
@@ -67,15 +83,32 @@ start_mysql() {
         return 1
     fi
 
+    local MYSQL_BASE="mysql -u root --socket=$MYSQL_SOCKET"
+
     # 设置 root 密码
-    mysql -u root -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD:-claw123}'; FLUSH PRIVILEGES;" 2>/dev/null || true
+    if $MYSQL_BASE -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '${MYSQL_PASS}'; FLUSH PRIVILEGES;" 2>/dev/null; then
+        ok "root 密码已设置"
+    else
+        warn "root 密码设置失败（可能已设置过）"
+    fi
+
+    MYSQL_BASE="mysql -u root -p${MYSQL_PASS} --socket=$MYSQL_SOCKET"
+
+    # 创建 xlongxia 数据库用户
+    log "创建数据库用户..."
+    $MYSQL_BASE -e "CREATE USER IF NOT EXISTS 'xlongxia'@'%' IDENTIFIED BY 'Xlongxia_123';" 2>/dev/null || true
+    $MYSQL_BASE -e "GRANT ALL PRIVILEGES ON xlongxia.* TO 'xlongxia'@'%';" 2>/dev/null || true
+    $MYSQL_BASE -e "FLUSH PRIVILEGES;" 2>/dev/null || true
+    ok "数据库用户就绪"
 
     # 初始化数据库 Schema
     init_databases
 }
 
 init_databases() {
-    local mysql_cmd="mysql -u root -p${MYSQL_ROOT_PASSWORD:-claw123}"
+    local MYSQL_SOCKET="/var/run/mysqld/mysqld.sock"
+    local MYSQL_PASS="${MYSQL_ROOT_PASSWORD:-claw123}"
+    local mysql_cmd="mysql -u root -p${MYSQL_PASS} --socket=$MYSQL_SOCKET"
 
     # xlongxia 数据库
     if [ -f "$APP_DIR/schema_xlongxia.sql" ]; then

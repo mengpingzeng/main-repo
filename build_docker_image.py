@@ -31,7 +31,7 @@ def main():
 
     # 3. 生成时间标签 格式 YYYYMMDD_HHMMSS
     tag_time = datetime.now().strftime("%Y%m%d_%H%M%S")
-    image_tag = f"zwf:{tag_time}"
+    image_tag = f"crpi-o1vsdbpms95lywf7.cn-shenzhen.personal.cr.aliyuncs.com/cszwf/zwf:{tag_time}"
 
     # 4. 组装docker build命令，追加build-arg传递API KEY
     cmd = [

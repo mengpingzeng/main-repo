@@ -3,18 +3,18 @@ version: "3.8"
 services:
   zwf:
     # 镜像名称
-    image: ${IMAGE_TAG}
+    image: zwf:20260622_003547
     container_name: zwf
-    restart: always
+    #restart: always
     ports:
       # 对外端口
       - "8088:8088"
       - "3000:3000"
     volumes:
       # 宿主机的/mnt/data/目录作为持久化目录挂载到容器当中
-      - /mnt/data/runtime:/tmp
-      - /mnt/data/mysql:/var/lib/mysql
-    environment:
+      - /mnt/data/runtime/:/tmp/
+      #- /mnt/data/mysql:/var/lib/mysql
+    #environment:
       # 可选，构建镜像的时候已经内置了DEEPSEEK_API_KEY，如果需要覆盖，则指定这个参数，否则可以删除
-      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
-    detach: true
+      # - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+    #detach: true
