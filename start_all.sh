@@ -47,6 +47,13 @@ ensure_frontend_permissions() {
     local me="$RUN_USER"
     local dir fixed=0
 
+    # 修复整个前端目录属主（含 package-lock.json 等根目录文件）
+    if find "$FE_DIR" -maxdepth 1 ! -user "$me" -print -quit 2>/dev/null | grep -q .; then
+        warn "  $FE_DIR 根目录存在非 $me 属主文件（含 package-lock.json 等），正在修复..."
+        sudo chown -R "$me:$me" "$FE_DIR" 2>/dev/null && ok "  $FE_DIR 属主已全部修正为 $me" || warn "  chown $FE_DIR 失败，请手动检查"
+        fixed=1
+    fi
+
     cd "$FE_DIR"
     for dir in .next node_modules; do
         [ -d "$dir" ] || continue
