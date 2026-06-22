@@ -466,6 +466,14 @@ func (a *QimaoPublishAdapter) runScript(ctx context.Context, input qimaoInput, c
 		}
 	}
 
+	stdoutStr := strings.TrimSpace(stdout.String())
+	if stdoutStr != "" {
+		var output QimaoOutput
+		if err := json.Unmarshal([]byte(stdoutStr), &output); err == nil {
+			return &output, nil
+		}
+	}
+
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			if status, ok := exitErr.Sys().(syscall.WaitStatus); ok && status.Signaled() {
@@ -475,16 +483,7 @@ func (a *QimaoPublishAdapter) runScript(ctx context.Context, input qimaoInput, c
 		return nil, fmt.Errorf("qimao puppeteer failed: %w", err)
 	}
 
-	stdoutStr := strings.TrimSpace(stdout.String())
-	if stdoutStr == "" {
-		return nil, fmt.Errorf("qimao puppeteer empty output")
-	}
-
-	var output QimaoOutput
-	if err := json.Unmarshal([]byte(stdoutStr), &output); err != nil {
-		return nil, fmt.Errorf("parse qimao output: %w, raw=%s", err, stdoutStr)
-	}
-	return &output, nil
+	return nil, fmt.Errorf("qimao puppeteer empty output")
 }
 
 func (a *QimaoPublishAdapter) fail(code, msg string, maskedDisplay string) *PublishResult {

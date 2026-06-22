@@ -32,6 +32,14 @@ const (
 
 var ErrDailyLimitReached = errors.New("daily_limit_reached")
 
+var apLogger = func() *log.Logger {
+	f, err := os.OpenFile("/tmp/logs/bff_handler.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err == nil {
+		return log.New(f, "[auto_publish] ", log.LstdFlags)
+	}
+	return log.New(os.Stderr, "[auto_publish] ", log.LstdFlags)
+}()
+
 type AutoPublishManager struct {
 	jobs              map[string]*AutoPublishJob
 	mu                sync.RWMutex

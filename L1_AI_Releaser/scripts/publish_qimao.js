@@ -274,7 +274,19 @@ async function doGetBookList(cookieStr, input) {
             books,
             total: result.json ? result.json.data.total : 0,
         };
-    } finally { await browser.close().catch(() => {}); _globalBrowser = null; log('info', 'browser closed'); }
+    } finally {
+        try {
+            await Promise.race([
+                browser.close(),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('close timeout')), 15_000))
+            ]);
+        } catch (e) {
+            log('warn', 'browser close failed or timed out', { error: e.message });
+            try { if (browser && browser.process()) browser.process().kill('SIGKILL'); } catch (_) {}
+        }
+        _globalBrowser = null;
+        log('info', 'browser closed');
+    }
 }
 
 // ======================== Action: get_book_option ========================
@@ -364,7 +376,19 @@ async function doGetBookOption(cookieStr, input) {
             category2: cat2,
             pickedTagIds: tagIds,
         };
-    } finally { await browser.close().catch(() => {}); _globalBrowser = null; log('info', 'browser closed'); }
+    } finally {
+        try {
+            await Promise.race([
+                browser.close(),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('close timeout')), 15_000))
+            ]);
+        } catch (e) {
+            log('warn', 'browser close failed or timed out', { error: e.message });
+            try { if (browser && browser.process()) browser.process().kill('SIGKILL'); } catch (_) {}
+        }
+        _globalBrowser = null;
+        log('info', 'browser closed');
+    }
 }
 
 // ======================== Action: get_platform_info ========================
@@ -402,7 +426,19 @@ async function doGetPlatformInfo(cookieStr, input) {
         };
         log('info', 'get_platform_info result', { bookExists: result.bookExists, bookId: result.bookId });
         return result;
-    } finally { await browser.close().catch(() => {}); _globalBrowser = null; log('info', 'browser closed'); }
+    } finally {
+        try {
+            await Promise.race([
+                browser.close(),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('close timeout')), 15_000))
+            ]);
+        } catch (e) {
+            log('warn', 'browser close failed or timed out', { error: e.message });
+            try { if (browser && browser.process()) browser.process().kill('SIGKILL'); } catch (_) {}
+        }
+        _globalBrowser = null;
+        log('info', 'browser closed');
+    }
 }
 
 // ======================== Action: create_book ========================
@@ -454,7 +490,19 @@ async function doCreateBook(cookieStr, input) {
 
         log('info', 'book created', { bookId, title });
         return { success: true, action: 'create_book', bookId };
-    } finally { await browser.close().catch(() => {}); _globalBrowser = null; log('info', 'browser closed'); }
+    } finally {
+        try {
+            await Promise.race([
+                browser.close(),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('close timeout')), 15_000))
+            ]);
+        } catch (e) {
+            log('warn', 'browser close failed or timed out', { error: e.message });
+            try { if (browser && browser.process()) browser.process().kill('SIGKILL'); } catch (_) {}
+        }
+        _globalBrowser = null;
+        log('info', 'browser closed');
+    }
 }
 
 // ======================== Action: set_book_info ========================
@@ -558,7 +606,19 @@ async function doSetBookInfo(cookieStr, input) {
         }
         log('info', 'set_book_info success', { bookId });
         return { success: true, action: 'set_book_info', bookId };
-    } finally { await browser.close().catch(() => {}); _globalBrowser = null; log('info', 'browser closed'); }
+    } finally {
+        try {
+            await Promise.race([
+                browser.close(),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('close timeout')), 15_000))
+            ]);
+        } catch (e) {
+            log('warn', 'browser close failed or timed out', { error: e.message });
+            try { if (browser && browser.process()) browser.process().kill('SIGKILL'); } catch (_) {}
+        }
+        _globalBrowser = null;
+        log('info', 'browser closed');
+    }
 }
 
 // ======================== Action: save_draft ========================
@@ -615,7 +675,19 @@ async function doSaveDraft(cookieStr, input) {
 
         log('info', 'save_draft success', { title: chapterTitle });
         return { success: true, action: 'save_draft' };
-    } finally { await browser.close().catch(() => {}); _globalBrowser = null; log('info', 'browser closed'); }
+    } finally {
+        try {
+            await Promise.race([
+                browser.close(),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('close timeout')), 15_000))
+            ]);
+        } catch (e) {
+            log('warn', 'browser close failed or timed out', { error: e.message });
+            try { if (browser && browser.process()) browser.process().kill('SIGKILL'); } catch (_) {}
+        }
+        _globalBrowser = null;
+        log('info', 'browser closed');
+    }
 }
 
 // ======================== Action: get_chapter_list ========================
@@ -678,7 +750,19 @@ async function doGetChapterList(cookieStr, input) {
             lastPublished,
             maxNameIndex,
         };
-    } finally { await browser.close().catch(() => {}); _globalBrowser = null; log('info', 'browser closed'); }
+    } finally {
+        try {
+            await Promise.race([
+                browser.close(),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('close timeout')), 15_000))
+            ]);
+        } catch (e) {
+            log('warn', 'browser close failed or timed out', { error: e.message });
+            try { if (browser && browser.process()) browser.process().kill('SIGKILL'); } catch (_) {}
+        }
+        _globalBrowser = null;
+        log('info', 'browser closed');
+    }
 }
 
 // ======================== Action: publish_draft ========================
@@ -720,8 +804,22 @@ async function doPublishDraft(cookieStr, input) {
         }
 
         log('info', 'publish_draft success', { chapterId });
-        return { success: true, action: 'publish_draft', chapterId };
-    } finally { await browser.close().catch(() => {}); _globalBrowser = null; log('info', 'browser closed'); }
+        const r = { success: true, action: 'publish_draft', chapterId };
+        process.stdout.write(JSON.stringify(r) + '\n');
+        return r;
+    } finally {
+        try {
+            await Promise.race([
+                browser.close(),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('close timeout')), 15_000))
+            ]);
+        } catch (e) {
+            log('warn', 'browser close failed or timed out', { error: e.message });
+            try { if (browser && browser.process()) browser.process().kill('SIGKILL'); } catch (_) {}
+        }
+        _globalBrowser = null;
+        log('info', 'browser closed');
+    }
 }
 
 // ======================== 主流程 ========================
@@ -773,7 +871,8 @@ async function main() {
                     break;
                 case 'publish_draft':
                     result = await doPublishDraft(cookieStr, input);
-                    break;
+                    log('info', 'publish success', result);
+                    return;
                 default:
                     fail('unknown action: ' + action);
                     return;

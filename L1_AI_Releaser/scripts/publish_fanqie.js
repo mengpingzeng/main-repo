@@ -192,7 +192,19 @@ async function doSaveDraft(cookieStr, input) {
             log('info', 'itemId captured from page URL', { itemId });
         }
         return result;
-    } finally { await browser.close().catch(() => {}); _globalBrowser = null; log('info', 'browser closed'); }
+    } finally {
+        try {
+            await Promise.race([
+                browser.close(),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('close timeout')), 15_000))
+            ]);
+        } catch (e) {
+            log('warn', 'browser close failed or timed out', { error: e.message });
+            try { if (browser && browser.process()) browser.process().kill('SIGKILL'); } catch (_) {}
+        }
+        _globalBrowser = null;
+        log('info', 'browser closed');
+    }
 }
 
 
@@ -261,7 +273,19 @@ async function doCoverArticle(cookieStr, input) {
             return { success: true, action: 'save_draft', draftItemId: itemId };
         }
         throw new Error('cover_article failed: code=' + result.code + ' msg=' + (result.message || ''));
-    } finally { await browser.close().catch(() => {}); _globalBrowser = null; log('info', 'browser closed'); }
+    } finally {
+        try {
+            await Promise.race([
+                browser.close(),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('close timeout')), 15_000))
+            ]);
+        } catch (e) {
+            log('warn', 'browser close failed or timed out', { error: e.message });
+            try { if (browser && browser.process()) browser.process().kill('SIGKILL'); } catch (_) {}
+        }
+        _globalBrowser = null;
+        log('info', 'browser closed');
+    }
 }
 
 
@@ -331,23 +355,29 @@ async function doGetPlatformInfo(cookieStr, input) {
         page = await browser.newPage(); await page.setViewport(CONFIG.VIEWPORT);
         await loginAndNavigate(page, cookieStr);
         let newlyCreated = false;
-        if (input.workId) { await enterNovelByWorkId(page, input.workId, novelName); } else { newlyCreated = await findAndEnterNovel(page, novelName); }
-        await sleep(3000); await dismissPopups(page); await sleep(1000);
-        let wkId = await getWorkId(page);
-        if (!wkId) {
-            await clickButton(page, ['作品管理', '我的作品', '作品']); await sleep(2000);
-            wkId = await page.evaluate((name) => {
-                const rows = document.querySelectorAll('tr, li, div[class*="row"], div[class*="item"], div[class*="card"]');
-                for (const row of rows) { if (row.textContent && row.textContent.includes(name)) { const links = row.querySelectorAll('a[href*="/writer/"]'); for (const link of links) { const m = (link.getAttribute('href') || '').match(/writer\/(\d+)/); if (m) return m[1]; } } }
-                return null;
-            }, novelName);
-            if (wkId) { await clickChapterManagement(page, novelName); await sleep(2000); }
+        let wkId = null;
+        let bookName = novelName;
+        if (input.workId) {
+            wkId = input.workId;
+        } else {
+            await sleep(3000); await dismissPopups(page); await sleep(1000);
+            newlyCreated = await findAndEnterNovel(page, novelName);
+            wkId = await getWorkId(page);
+            if (!wkId) {
+                await clickButton(page, ['作品管理', '我的作品', '作品']); await sleep(2000);
+                wkId = await page.evaluate((name) => {
+                    const rows = document.querySelectorAll('tr, li, div[class*="row"], div[class*="item"], div[class*="card"]');
+                    for (const row of rows) { if (row.textContent && row.textContent.includes(name)) { const links = row.querySelectorAll('a[href*="/writer/"]'); for (const link of links) { const m = (link.getAttribute('href') || '').match(/writer\/(\d+)/); if (m) return m[1]; } } }
+                    return null;
+                }, novelName);
+                if (wkId) { await clickChapterManagement(page, novelName); await sleep(2000); }
+            }
+            log('info', 'workId extracted', { workId: wkId });
+            bookName = await page.evaluate(() => {
+                const m = window.location.href.match(/chapter-manage\/\d+&([^?]+)/);
+                return m ? decodeURIComponent(m[1]) : null;
+            }) || novelName;
         }
-        log('info', 'workId extracted', { workId: wkId });
-        let bookName = await page.evaluate(() => {
-            const m = window.location.href.match(/chapter-manage\/\d+&([^?]+)/);
-            return m ? decodeURIComponent(m[1]) : null;
-        }) || novelName;
         let chapterData = { chapters: [], lastPublished: null }; let volumeData = []; let drafts = [];
         if (wkId) {
             if (typeof fetchChapterListViaAPI === 'function') { chapterData = await fetchChapterListViaAPI(page, wkId); log('info', 'published chapters via API', { count: chapterData.chapters ? chapterData.chapters.length : 0 }); }
@@ -357,6 +387,7 @@ async function doGetPlatformInfo(cookieStr, input) {
         if (newlyCreated) {
             return { success: true, action: 'get_platform_info', workId: wkId, newlyCreated: true, bookName: bookName, msToken: '', drafts: [], publishedChapters: [], lastPublished: null, volumes: volumeData };
         }
+        if (!input.workId) {
         if (chapterData.chapters.length === 0) {
             if (typeof extractChapterListFromPage === 'function') { chapterData = await extractChapterListFromPage(page); log('info', 'published chapters via DOM (fallback)', { count: chapterData.chapters.length }); }
         }
@@ -368,9 +399,22 @@ async function doGetPlatformInfo(cookieStr, input) {
             await takeScreenshot(page, 'fanqie_platform_info_draft_page');
             if (typeof extractDraftListFromPage === 'function') { drafts = await extractDraftListFromPage(page); log('info', 'drafts via DOM (fallback)', { count: drafts.length }); }
         }
+        }
         const platformMsToken = await getMsToken(page);
         return { success: true, action: 'get_platform_info', workId: wkId, newlyCreated: newlyCreated, bookName: bookName, msToken: platformMsToken, drafts, publishedChapters: chapterData.chapters || [], lastPublished: chapterData.lastPublished || null, volumes: volumeData };
-    } finally { await browser.close().catch(() => {}); _globalBrowser = null; log('info', 'browser closed'); }
+    } finally {
+        try {
+            await Promise.race([
+                browser.close(),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('close timeout')), 15_000))
+            ]);
+        } catch (e) {
+            log('warn', 'browser close failed or timed out', { error: e.message });
+            try { if (browser && browser.process()) browser.process().kill('SIGKILL'); } catch (_) {}
+        }
+        _globalBrowser = null;
+        log('info', 'browser closed');
+    }
 }
 
 // ======================== action: set_book_info ========================
@@ -426,7 +470,19 @@ async function doSetBookInfo(cookieStr, input) {
         }, { name, description: (description || '').substring(0, 500), category: category || '', coverBase64, workId: workId || '', roles: roles || '' });
         log('info', 'set_book_info success', { picURI });
         return { success: true, action: 'set_book_info', picURI };
-    } finally { await browser.close().catch(() => {}); _globalBrowser = null; log('info', 'browser closed'); }
+    } finally {
+        try {
+            await Promise.race([
+                browser.close(),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('close timeout')), 15_000))
+            ]);
+        } catch (e) {
+            log('warn', 'browser close failed or timed out', { error: e.message });
+            try { if (browser && browser.process()) browser.process().kill('SIGKILL'); } catch (_) {}
+        }
+        _globalBrowser = null;
+        log('info', 'browser closed');
+    }
 }
 
 // ======================== action: publish_draft ========================
@@ -548,7 +604,17 @@ async function doPublishDraft(cookieStr, input) {
         log('info', 'chapter published', { postId, workId, novelName });
         return { success: true, postId };
     } finally {
-        await browser.close().catch(() => {}); _globalBrowser = null; log('info', 'browser closed');
+        try {
+            await Promise.race([
+                browser.close(),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('close timeout')), 15_000))
+            ]);
+        } catch (e) {
+            log('warn', 'browser close failed or timed out', { error: e.message });
+            try { if (browser && browser.process()) browser.process().kill('SIGKILL'); } catch (_) {}
+        }
+        _globalBrowser = null;
+        log('info', 'browser closed');
     }
 }
 
@@ -637,7 +703,9 @@ async function doPublishArticle(cookieStr, input) {
 
         log('info', 'publish_article response', { code: result.code, message: result.message, itemId: result.itemId });
         if (result.code === 0) {
-            return { success: true, action: 'publish_article', postId: result.itemId || itemId };
+            const r = { success: true, action: 'publish_article', postId: result.itemId || itemId };
+            process.stdout.write(JSON.stringify(r) + '\n');
+            return r;
         }
 
         if (result.code === -1019) {
@@ -651,7 +719,19 @@ async function doPublishArticle(cookieStr, input) {
         }
 
         throw new Error('publish_article failed: code=' + result.code + ' msg=' + (result.message || ''));
-    } finally { await browser.close().catch(() => {}); _globalBrowser = null; log('info', 'browser closed'); }
+    } finally {
+        try {
+            await Promise.race([
+                browser.close(),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('close timeout')), 15_000))
+            ]);
+        } catch (e) {
+            log('warn', 'browser close failed or timed out', { error: e.message });
+            try { if (browser && browser.process()) browser.process().kill('SIGKILL'); } catch (_) {}
+        }
+        _globalBrowser = null;
+        log('info', 'browser closed');
+    }
 }
 
 
@@ -721,7 +801,8 @@ async function main() {
                     break;
                 case 'publish_article':
                     result = await doPublishArticle(cookieStr, input);
-                    break;
+                    log('info', 'publish success', result);
+                    return;
                 case 'get_platform_info':
                     result = await doGetPlatformInfo(cookieStr, input);
                     break;

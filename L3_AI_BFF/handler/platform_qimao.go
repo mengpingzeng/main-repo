@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -66,14 +65,14 @@ func (p *QimaoPlatform) Run(job *AutoPublishJob) {
 			if staged == nil {
 				job.retryCount++
 				if job.retryCount > maxRetries {
-					log.Printf("[auto_publish] task=%s phasePrepare连续失败%d次, 退出并重新入队", job.TaskID, maxRetries)
+					apLogger.Printf(" task=%s phasePrepare连续失败%d次, 退出并重新入队", job.TaskID, maxRetries)
 					p.mgr.cleanupSessions(job)
 					if job.onExitRequeue != nil {
 						job.onExitRequeue(job, fmt.Errorf("phasePrepare连续失败%d次", maxRetries))
 					}
 					return
 				}
-				log.Printf("[auto_publish] task=%s phasePrepare失败(第%d/%d次)(qimao), 1分钟后重试",
+				apLogger.Printf(" task=%s phasePrepare失败(第%d/%d次)(qimao), 1分钟后重试",
 					job.TaskID, job.retryCount, maxRetries)
 				p.mgr.sleepOrStop(job, 1*time.Minute)
 				continue
@@ -94,7 +93,7 @@ func (p *QimaoPlatform) Run(job *AutoPublishJob) {
 		if staged.draft == "" {
 			if err := p.mgr.phaseGenerate(job, staged); err != nil {
 				if errors.Is(err, ErrDailyLimitReached) {
-					log.Printf("[auto_publish] task=%s DAILY_LIMIT(AI生成), 退出并重新入队", job.TaskID)
+					apLogger.Printf(" task=%s DAILY_LIMIT(AI生成), 退出并重新入队", job.TaskID)
 					p.mgr.cleanupSessions(job)
 					if job.onExitRequeue != nil {
 						job.onExitRequeue(job, err)
@@ -103,14 +102,14 @@ func (p *QimaoPlatform) Run(job *AutoPublishJob) {
 				}
 				job.retryCount++
 				if job.retryCount > maxRetries {
-					log.Printf("[auto_publish] task=%s AI生成连续失败%d次, 退出并重新入队", job.TaskID, maxRetries)
+					apLogger.Printf(" task=%s AI生成连续失败%d次, 退出并重新入队", job.TaskID, maxRetries)
 					p.mgr.cleanupSessions(job)
 					if job.onExitRequeue != nil {
 						job.onExitRequeue(job, err)
 					}
 					return
 				}
-				log.Printf("[auto_publish] task=%s AI生成失败(第%d/%d次): %v, 1分钟后重试",
+				apLogger.Printf(" task=%s AI生成失败(第%d/%d次): %v, 1分钟后重试",
 					job.TaskID, job.retryCount, maxRetries, err)
 				p.mgr.sleepOrStop(job, 1*time.Minute)
 				continue
@@ -120,7 +119,7 @@ func (p *QimaoPlatform) Run(job *AutoPublishJob) {
 		if staged.draftItemID == "" {
 			if err := p.phaseSaveDraft(job, staged); err != nil {
 				if errors.Is(err, ErrDailyLimitReached) {
-					log.Printf("[auto_publish] task=%s DAILY_LIMIT(存草稿), 退出并重新入队", job.TaskID)
+					apLogger.Printf(" task=%s DAILY_LIMIT(存草稿), 退出并重新入队", job.TaskID)
 					p.mgr.cleanupSessions(job)
 					if job.onExitRequeue != nil {
 						job.onExitRequeue(job, err)
@@ -129,14 +128,14 @@ func (p *QimaoPlatform) Run(job *AutoPublishJob) {
 				}
 				job.retryCount++
 				if job.retryCount > maxRetries {
-					log.Printf("[auto_publish] task=%s 存草稿连续失败%d次, 退出并重新入队", job.TaskID, maxRetries)
+					apLogger.Printf(" task=%s 存草稿连续失败%d次, 退出并重新入队", job.TaskID, maxRetries)
 					p.mgr.cleanupSessions(job)
 					if job.onExitRequeue != nil {
 						job.onExitRequeue(job, err)
 					}
 					return
 				}
-				log.Printf("[auto_publish] task=%s 存草稿失败(第%d/%d次): %v, 1分钟后重试",
+				apLogger.Printf(" task=%s 存草稿失败(第%d/%d次): %v, 1分钟后重试",
 					job.TaskID, job.retryCount, maxRetries, err)
 				p.mgr.sleepOrStop(job, 1*time.Minute)
 				continue
@@ -146,7 +145,7 @@ func (p *QimaoPlatform) Run(job *AutoPublishJob) {
 
 		if err := p.phasePublishDraft(job, staged); err != nil {
 			if errors.Is(err, ErrDailyLimitReached) {
-				log.Printf("[auto_publish] task=%s DAILY_LIMIT(发布), 退出并重新入队", job.TaskID)
+				apLogger.Printf(" task=%s DAILY_LIMIT(发布), 退出并重新入队", job.TaskID)
 				p.mgr.cleanupSessions(job)
 				if job.onExitRequeue != nil {
 					job.onExitRequeue(job, err)
@@ -155,20 +154,20 @@ func (p *QimaoPlatform) Run(job *AutoPublishJob) {
 			}
 			job.retryCount++
 			if job.retryCount > maxRetries {
-				log.Printf("[auto_publish] task=%s 发布连续失败%d次, 退出并重新入队", job.TaskID, maxRetries)
+				apLogger.Printf(" task=%s 发布连续失败%d次, 退出并重新入队", job.TaskID, maxRetries)
 				p.mgr.cleanupSessions(job)
 				if job.onExitRequeue != nil {
 					job.onExitRequeue(job, err)
 				}
 				return
 			}
-			log.Printf("[auto_publish] task=%s 发布失败(第%d/%d次): %v, 1分钟后重试",
+			apLogger.Printf(" task=%s 发布失败(第%d/%d次): %v, 1分钟后重试",
 				job.TaskID, job.retryCount, maxRetries, err)
 			p.mgr.sleepOrStop(job, 1*time.Minute)
 			continue
 		}
 
-		log.Printf("[auto_publish] task=%s ===== 第%d章完成(qimao) =====", job.TaskID, staged.chapterNumber)
+		apLogger.Printf(" task=%s ===== 第%d章完成(qimao) =====", job.TaskID, staged.chapterNumber)
 		job.retryCount = 0
 
 		job.mu.Lock()
@@ -180,7 +179,7 @@ func (p *QimaoPlatform) Run(job *AutoPublishJob) {
 		}
 
 		if p.cfg.MaxChaptersPerBatch > 0 && batchCount >= p.cfg.MaxChaptersPerBatch {
-			log.Printf("[auto_publish] task=%s 本轮已完成%d章(qimao), 暂停并重新入队", job.TaskID, batchCount)
+			apLogger.Printf(" task=%s 本轮已完成%d章(qimao), 暂停并重新入队", job.TaskID, batchCount)
 			p.mgr.cleanupSessions(job)
 			if job.onExitRequeue != nil {
 				job.onExitRequeue(job, fmt.Errorf("batch limit: %w", ErrDailyLimitReached))
@@ -209,18 +208,21 @@ func (p *QimaoPlatform) Finalize(job *AutoPublishJob) error {
 	}
 
 	taskID := job.TaskID
-	log.Printf("[auto_publish] task=%s ===== 开始生成章节(qimao, isFinale=true) =====", taskID)
+	apLogger.Printf(" task=%s ===== 开始生成章节(qimao, isFinale=true) =====", taskID)
 
-	platformInfo, pubErr := p.adapter.GetPlatformInfo(job.stopCtx, novelName, cred)
-	if pubErr != nil {
-		return fmt.Errorf("get platform info: %s (code=%s)", pubErr.ErrorMessage, pubErr.ErrorCode)
-	}
+	bookID := job.WorkID
+	if bookID == "" {
+		platformInfo, pubErr := p.adapter.GetPlatformInfo(job.stopCtx, novelName, cred)
+		if pubErr != nil {
+			return fmt.Errorf("get platform info: %s (code=%s)", pubErr.ErrorMessage, pubErr.ErrorCode)
+		}
 
-	bookID := platformInfo.BookID
-	if !platformInfo.BookExists || bookID == "" {
-		bookID = p.ensureBookExists(job, cred, novelName)
-		if bookID == "" {
-			return fmt.Errorf("failed to get book_id for novel: %s", novelName)
+		bookID = platformInfo.BookID
+		if !platformInfo.BookExists || bookID == "" {
+			bookID = p.ensureBookExists(job, cred, novelName)
+			if bookID == "" {
+				return fmt.Errorf("failed to get book_id for novel: %s", novelName)
+			}
 		}
 	}
 
@@ -244,7 +246,7 @@ func (p *QimaoPlatform) Finalize(job *AutoPublishJob) error {
 		currentVolume = "第一卷"
 	}
 
-	log.Printf("[auto_publish] task=%s 计算下一章(qimao): chapter=%d bookId=%s", taskID, nextChapter, bookID)
+	apLogger.Printf(" task=%s 计算下一章(qimao): chapter=%d bookId=%s", taskID, nextChapter, bookID)
 
 	sessionID, _, err := p.mgr.wakeTask(job, true)
 	if err != nil {
@@ -259,9 +261,9 @@ func (p *QimaoPlatform) Finalize(job *AutoPublishJob) error {
 			}
 			if existingSID != "" {
 				if p.mgr.isSessionAlive(existingSID) {
-					log.Printf("[auto_publish] task=%s 活跃session=%s 仍在运行中", taskID, existingSID)
+					apLogger.Printf(" task=%s 活跃session=%s 仍在运行中", taskID, existingSID)
 				} else {
-					log.Printf("[auto_publish] task=%s session=%s 为僵尸，关闭后重试wake", taskID, existingSID)
+					apLogger.Printf(" task=%s session=%s 为僵尸，关闭后重试wake", taskID, existingSID)
 					p.mgr.closeSessionQuiet(existingSID)
 					sessionID, _, err = p.mgr.wakeTask(job, true)
 				}
@@ -271,7 +273,7 @@ func (p *QimaoPlatform) Finalize(job *AutoPublishJob) error {
 			return fmt.Errorf("wake task: %w", err)
 		}
 	}
-	log.Printf("[auto_publish] task=%s session=%s 已创建", taskID, sessionID)
+	apLogger.Printf(" task=%s session=%s 已创建", taskID, sessionID)
 
 	draft, chapterTitle, draftVersion, err := p.mgr.waitForSession(job, sessionID)
 	if err != nil {
@@ -284,13 +286,13 @@ func (p *QimaoPlatform) Finalize(job *AutoPublishJob) error {
 	job.DraftVersion = draftVersion
 	job.mu.Unlock()
 
-	log.Printf("[auto_publish] task=%s AI 生成完成(qimao): title=%s contentLen=%d", taskID, chapterTitle, len(draft))
+	apLogger.Printf(" task=%s AI 生成完成(qimao): title=%s contentLen=%d", taskID, chapterTitle, len(draft))
 	if chapterTitle == "" {
 		chapterTitle = fallbackChapterTitle(draft)
 	}
 
 	fullTitle := fmt.Sprintf("第%d章 %s", nextChapter, chapterTitle)
-	log.Printf("[auto_publish] task=%s 存草稿(qimao) title=%s chapter=%d bookId=%s", taskID, fullTitle, nextChapter, bookID)
+	apLogger.Printf(" task=%s 存草稿(qimao) title=%s chapter=%d bookId=%s", taskID, fullTitle, nextChapter, bookID)
 
 	saveResult := p.adapter.SaveDraft(job.stopCtx, bookID, fullTitle, draft, nextChapter, cred)
 	if saveResult.Status != "ok" {
@@ -308,7 +310,7 @@ func (p *QimaoPlatform) Finalize(job *AutoPublishJob) error {
 	if targetChapterID == "" {
 		return fmt.Errorf("cannot match draft chapter_id for chapter %d", nextChapter)
 	}
-	log.Printf("[auto_publish] task=%s 匹配草稿 chapterId=%s", taskID, targetChapterID)
+	apLogger.Printf(" task=%s 匹配草稿 chapterId=%s", taskID, targetChapterID)
 
 	pubResult := p.adapter.PublishDraft(job.stopCtx, bookID, targetChapterID, cred)
 	if pubResult.Status != "ok" {
@@ -318,7 +320,7 @@ func (p *QimaoPlatform) Finalize(job *AutoPublishJob) error {
 		return fmt.Errorf("publish draft: %s (code=%s)", pubResult.ErrorMessage, pubResult.ErrorCode)
 	}
 
-	log.Printf("[auto_publish] task=%s 发布成功(qimao): chapter=%d postId=%s", taskID, nextChapter, pubResult.PostID)
+	apLogger.Printf(" task=%s 发布成功(qimao): chapter=%d postId=%s", taskID, nextChapter, pubResult.PostID)
 	p.mgr.updatePublishedCount(job)
 	p.mgr.saveSessionPostID(job.TaskID, sessionID, pubResult.PostID)
 	p.mgr.updateTaskChapterNumber(job, chapterTitle, nextChapter)
@@ -329,48 +331,61 @@ func (p *QimaoPlatform) Finalize(job *AutoPublishJob) error {
 // phasePrepare 七猫准备阶段。
 func (p *QimaoPlatform) phasePrepare(job *AutoPublishJob) *chapterGenState {
 	if p.adapter == nil {
-		log.Printf("[auto_publish] task=%s qimao adapter not configured", job.TaskID)
+		apLogger.Printf(" task=%s qimao adapter not configured", job.TaskID)
 		return nil
 	}
 
 	cred, err := p.getCredential(job)
 	if err != nil {
-		log.Printf("[auto_publish] task=%s 获取凭据失败(qimao): %v", job.TaskID, err)
+		apLogger.Printf(" task=%s 获取凭据失败(qimao): %v", job.TaskID, err)
 		return nil
 	}
 
 	taskID := job.TaskID
 	novelName := job.NovelName
 
-	platformInfo, pubErr := p.adapter.GetPlatformInfo(job.stopCtx, novelName, cred)
-	if pubErr != nil {
-		log.Printf("[auto_publish] task=%s get_platform_info失败(qimao): %s (code=%s)", taskID, pubErr.ErrorMessage, pubErr.ErrorCode)
-		return nil
-	}
+	bookID := job.WorkID
+	bookExists := bookID != ""
 
-	bookID := platformInfo.BookID
-	if !platformInfo.BookExists || bookID == "" {
-		bookID = p.ensureBookExists(job, cred, novelName)
-		if bookID == "" {
-			log.Printf("[auto_publish] task=%s 获取book_id失败(qimao)", taskID)
+	if !bookExists {
+		platformInfo, pubErr := p.adapter.GetPlatformInfo(job.stopCtx, novelName, cred)
+		if pubErr != nil {
+			apLogger.Printf(" task=%s get_platform_info失败(qimao): %s (code=%s)", taskID, pubErr.ErrorMessage, pubErr.ErrorCode)
 			return nil
 		}
+
+		bookID = platformInfo.BookID
+		bookExists = platformInfo.BookExists && bookID != ""
+
+		if !bookExists {
+			bookID = p.ensureBookExists(job, cred, novelName)
+			if bookID == "" {
+				apLogger.Printf(" task=%s 获取book_id失败(qimao)", taskID)
+				return nil
+			}
+		}
+
+		job.mu.Lock()
+		job.WorkID = bookID
+		job.mu.Unlock()
 	}
 
-	job.mu.Lock()
-	job.WorkID = bookID
-	job.mu.Unlock()
-
-	log.Printf("[auto_publish] task=%s 平台状态(qimao): bookId=%s bookExists=%v", taskID, bookID, platformInfo.BookExists)
+	apLogger.Printf(" task=%s 平台状态(qimao): bookId=%s bookExists=%v", taskID, bookID, bookExists)
 
 	chapters, chErr := p.adapter.GetChapterList(job.stopCtx, bookID, cred)
 	if chErr != nil {
-		log.Printf("[auto_publish] task=%s get_chapter_list失败(qimao): %s (code=%s)", taskID, chErr.ErrorMessage, chErr.ErrorCode)
+		apLogger.Printf(" task=%s get_chapter_list失败(qimao): %s (code=%s)", taskID, chErr.ErrorMessage, chErr.ErrorCode)
+		if bookExists {
+			job.mu.Lock()
+			job.WorkID = ""
+			job.mu.Unlock()
+			apLogger.Printf(" task=%s bookId=%s 已失效，下次重试将重新查找", taskID, bookID)
+		}
 		return nil
 	}
 
 	maxPublished := chapters.MaxNameIndex
-	log.Printf("[auto_publish] task=%s 章节状态(qimao): maxPublished=%d totalChapters=%d",
+	apLogger.Printf(" task=%s 章节状态(qimao): maxPublished=%d totalChapters=%d",
 		taskID, maxPublished, len(chapters.Chapters))
 
 	job.mu.Lock()
@@ -390,7 +405,7 @@ func (p *QimaoPlatform) phasePrepare(job *AutoPublishJob) *chapterGenState {
 		nextChapter = 1
 	}
 
-	log.Printf("[auto_publish] task=%s 计算下一章(qimao): chapter=%d (maxPublished=%d currentChapter=%d)",
+	apLogger.Printf(" task=%s 计算下一章(qimao): chapter=%d (maxPublished=%d currentChapter=%d)",
 		taskID, nextChapter, maxPublished, currentChapter)
 
 	job.mu.Lock()
@@ -410,7 +425,7 @@ func (p *QimaoPlatform) phaseSaveDraft(job *AutoPublishJob, state *chapterGenSta
 	taskID := job.TaskID
 	bookID := job.WorkID
 
-	log.Printf("[auto_publish] task=%s 存草稿(qimao) title=%s chapter=%d bookId=%s",
+	apLogger.Printf(" task=%s 存草稿(qimao) title=%s chapter=%d bookId=%s",
 		taskID, state.fullTitle, state.chapterNumber, bookID)
 
 	saveResult := p.adapter.SaveDraft(job.stopCtx, bookID, state.fullTitle, state.draft, state.chapterNumber, state.cred)
@@ -418,7 +433,7 @@ func (p *QimaoPlatform) phaseSaveDraft(job *AutoPublishJob, state *chapterGenSta
 		return fmt.Errorf("save draft: %s (code=%s)", saveResult.ErrorMessage, saveResult.ErrorCode)
 	}
 
-	log.Printf("[auto_publish] task=%s 存草稿成功(qimao), 等待平台写入...", taskID)
+	apLogger.Printf(" task=%s 存草稿成功(qimao), 等待平台写入...", taskID)
 	time.Sleep(3 * time.Second)
 
 	chapters, chErr := p.adapter.GetChapterList(job.stopCtx, bookID, state.cred)
@@ -426,12 +441,12 @@ func (p *QimaoPlatform) phaseSaveDraft(job *AutoPublishJob, state *chapterGenSta
 		draftChapterID := p.adapter.MatchDraftChapterID(chapters, state.chapterNumber)
 		if draftChapterID != "" {
 			state.draftItemID = draftChapterID
-			log.Printf("[auto_publish] task=%s 匹配草稿 chapterId=%s", taskID, draftChapterID)
+			apLogger.Printf(" task=%s 匹配草稿 chapterId=%s", taskID, draftChapterID)
 		} else {
-			log.Printf("[auto_publish] task=%s 警告: 未匹配到草稿 chapterId, 将在发布阶段重试", taskID)
+			apLogger.Printf(" task=%s 警告: 未匹配到草稿 chapterId, 将在发布阶段重试", taskID)
 		}
 	} else {
-		log.Printf("[auto_publish] task=%s 获取章节列表失败(qimao): %s", taskID, chErr.ErrorMessage)
+		apLogger.Printf(" task=%s 获取章节列表失败(qimao): %s", taskID, chErr.ErrorMessage)
 	}
 
 	return nil
@@ -442,7 +457,7 @@ func (p *QimaoPlatform) phasePublishDraft(job *AutoPublishJob, state *chapterGen
 	taskID := job.TaskID
 	bookID := job.WorkID
 
-	log.Printf("[auto_publish] task=%s 发布章节(qimao) title=%s chapter=%d bookId=%s draftItemId=%s",
+	apLogger.Printf(" task=%s 发布章节(qimao) title=%s chapter=%d bookId=%s draftItemId=%s",
 		taskID, state.fullTitle, state.chapterNumber, bookID, state.draftItemID)
 
 	draftChapterID := state.draftItemID
@@ -455,7 +470,7 @@ func (p *QimaoPlatform) phasePublishDraft(job *AutoPublishJob, state *chapterGen
 		if draftChapterID == "" {
 			return fmt.Errorf("cannot find draft chapter_id for chapter %d", state.chapterNumber)
 		}
-		log.Printf("[auto_publish] task=%s 重新匹配草稿 chapterId=%s", taskID, draftChapterID)
+		apLogger.Printf(" task=%s 重新匹配草稿 chapterId=%s", taskID, draftChapterID)
 	}
 
 	pubResult := p.adapter.PublishDraft(job.stopCtx, bookID, draftChapterID, state.cred)
@@ -466,13 +481,13 @@ func (p *QimaoPlatform) phasePublishDraft(job *AutoPublishJob, state *chapterGen
 		return fmt.Errorf("publish draft: %s (code=%s)", pubResult.ErrorMessage, pubResult.ErrorCode)
 	}
 
-	log.Printf("[auto_publish] task=%s 发布成功(qimao): title=%s postId=%s", taskID, state.fullTitle, pubResult.PostID)
+	apLogger.Printf(" task=%s 发布成功(qimao): title=%s postId=%s", taskID, state.fullTitle, pubResult.PostID)
 
 	if pubResult.PostID != "" {
 		p.mgr.updatePublishedCount(job)
 		p.mgr.saveSessionPostID(job.TaskID, state.sessionID, pubResult.PostID)
 	} else {
-		log.Printf("[auto_publish] task=%s postId 为空, 跳过发布计数", taskID)
+		apLogger.Printf(" task=%s postId 为空, 跳过发布计数", taskID)
 	}
 
 	return nil
@@ -480,12 +495,12 @@ func (p *QimaoPlatform) phasePublishDraft(job *AutoPublishJob, state *chapterGen
 
 // ensureBookExists 确保七猫平台上存在对应作品，不存在则创建。返回 book_id。
 func (p *QimaoPlatform) ensureBookExists(job *AutoPublishJob, cred, novelName string) string {
-	log.Printf("[auto_publish] task=%s 作品不存在(qimao), 开始创建...", job.TaskID)
+	apLogger.Printf(" task=%s 作品不存在(qimao), 开始创建...", job.TaskID)
 
 	_, description, _, roles, fetchErr := p.mgr.fetchSkillMeta(job.SkillID)
 	p.logRolesTrace(job.TaskID, "ensureBookExists.fetchSkillMeta", roles, fetchErr)
 	if fetchErr != nil {
-		log.Printf("[auto_publish] task=%s 获取skill元信息失败(qimao): %v", job.TaskID, fetchErr)
+		apLogger.Printf(" task=%s 获取skill元信息失败(qimao): %v", job.TaskID, fetchErr)
 	}
 	if description == "" {
 		description = "精彩小说"
@@ -493,30 +508,30 @@ func (p *QimaoPlatform) ensureBookExists(job *AutoPublishJob, cred, novelName st
 
 	bookOpt, optErr := p.adapter.GetBookOption(job.stopCtx, cred)
 	if optErr != nil {
-		log.Printf("[auto_publish] task=%s 获取建书选项失败(qimao): %s", job.TaskID, optErr.ErrorMessage)
+		apLogger.Printf(" task=%s 获取建书选项失败(qimao): %s", job.TaskID, optErr.ErrorMessage)
 	}
 
 	p.logRolesTrace(job.TaskID, "ensureBookExists.beforeCreateBook", fmt.Sprintf("novelName=%s description=[%d]chars roles=%q", novelName, len(description), roles), nil)
 	createResult := p.adapter.CreateBook(job.stopCtx, cred, novelName, description, roles, nil, bookOpt)
 	if createResult.Status == "ok" && createResult.PostID != "" {
-		log.Printf("[auto_publish] task=%s 创建作品成功(qimao): bookId=%s", job.TaskID, createResult.PostID)
+		apLogger.Printf(" task=%s 创建作品成功(qimao): bookId=%s", job.TaskID, createResult.PostID)
 		p.setNewBookInfo(job, cred, createResult.PostID, novelName)
 		return createResult.PostID
 	}
 
 	altNames := []string{novelName + "之续", novelName + "新篇"}
 	for _, altName := range altNames {
-		log.Printf("[auto_publish] task=%s 重试创建作品(qimao): altName=%s", job.TaskID, altName)
+		apLogger.Printf(" task=%s 重试创建作品(qimao): altName=%s", job.TaskID, altName)
 		createResult = p.adapter.CreateBook(job.stopCtx, cred, altName, description, roles, nil, bookOpt)
 		if createResult.Status == "ok" && createResult.PostID != "" {
-			log.Printf("[auto_publish] task=%s 创建作品成功(qimao,alt): bookId=%s altName=%s",
+			apLogger.Printf(" task=%s 创建作品成功(qimao,alt): bookId=%s altName=%s",
 				job.TaskID, createResult.PostID, altName)
 		p.setNewBookInfo(job, cred, createResult.PostID, altName)
 			return createResult.PostID
 		}
 	}
 
-	log.Printf("[auto_publish] task=%s 创建作品全部重试失败(qimao)", job.TaskID)
+	apLogger.Printf(" task=%s 创建作品全部重试失败(qimao)", job.TaskID)
 	return ""
 }
 
@@ -524,25 +539,25 @@ func (p *QimaoPlatform) ensureBookExists(job *AutoPublishJob, cred, novelName st
 func (p *QimaoPlatform) setNewBookInfo(job *AutoPublishJob, cred, bookId, novelName string) {
 	_, description, _, roles, fetchErr := p.mgr.fetchSkillMeta(job.SkillID)
 	if fetchErr != nil {
-		log.Printf("[auto_publish] task=%s 获取skill元信息失败(qimao): %v", job.TaskID, fetchErr)
+		apLogger.Printf(" task=%s 获取skill元信息失败(qimao): %v", job.TaskID, fetchErr)
 		return
 	}
 
 	author, authorErr := p.adapter.ResolveAuthorName(job.stopCtx, cred)
 	if authorErr != nil {
-		log.Printf("[auto_publish] task=%s 获取账号笔名失败(qimao): %v, 使用novelName作为fallback", job.TaskID, authorErr)
+		apLogger.Printf(" task=%s 获取账号笔名失败(qimao): %v, 使用novelName作为fallback", job.TaskID, authorErr)
 		author = novelName
 	}
 
 	coverBytes, downloadErr := p.mgr.downloadRenderedCover(job.SkillID, author, novelName)
 	if downloadErr != nil {
-		log.Printf("[auto_publish] task=%s 下载渲染封面失败(qimao): %v", job.TaskID, downloadErr)
+		apLogger.Printf(" task=%s 下载渲染封面失败(qimao): %v", job.TaskID, downloadErr)
 		return
 	}
 
 	bookOpt, optErr := p.adapter.GetBookOption(job.stopCtx, cred)
 	if optErr != nil {
-		log.Printf("[auto_publish] task=%s 获取建书选项失败(qimao): %s", job.TaskID, optErr.ErrorMessage)
+		apLogger.Printf(" task=%s 获取建书选项失败(qimao): %s", job.TaskID, optErr.ErrorMessage)
 	}
 	category1 := ""
 	category2 := ""
@@ -563,9 +578,9 @@ func (p *QimaoPlatform) setNewBookInfo(job *AutoPublishJob, cred, bookId, novelN
 
 	result := p.adapter.SetBookInfo(job.stopCtx, cred, bookId, novelName, description, category1, category2, tagIds, roles, coverBytes)
 	if result.Status != "ok" {
-		log.Printf("[auto_publish] task=%s 设置书籍信息失败(qimao): %s (code=%s)", job.TaskID, result.ErrorMessage, result.ErrorCode)
+		apLogger.Printf(" task=%s 设置书籍信息失败(qimao): %s (code=%s)", job.TaskID, result.ErrorMessage, result.ErrorCode)
 	} else {
-		log.Printf("[auto_publish] task=%s 书籍信息设置成功(qimao): bookId=%s name=%s", job.TaskID, bookId, novelName)
+		apLogger.Printf(" task=%s 书籍信息设置成功(qimao): bookId=%s name=%s", job.TaskID, bookId, novelName)
 	}
 }
 
@@ -603,7 +618,7 @@ func (p *QimaoPlatform) getCredential(job *AutoPublishJob) (string, error) {
 		req.Header.Set("Content-Type", "application/json")
 		resp, err := p.mgr.httpClient.Do(req)
 		if err != nil {
-			log.Printf("[auto_publish] task=%s 获取凭证失败(qimao) account=%s: %v", job.TaskID, accountID, err)
+			apLogger.Printf(" task=%s 获取凭证失败(qimao) account=%s: %v", job.TaskID, accountID, err)
 			continue
 		}
 

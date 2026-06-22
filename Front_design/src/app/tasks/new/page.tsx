@@ -304,9 +304,10 @@ export default function NewTaskPage() {
       if (platform === "fanqie") {
         const occupancy = await checkAccountOccupancy(platform, selectedAccountId)
         if (occupancy.occupied) {
+          const account = accounts.find(a => a.account_id === selectedAccountId)
+          const accountLabel = account?.masked_display || "该账号"
           toast.error(
-            occupancy.message
-              || `番茄账号已绑定小说「${occupancy.novel_name || "未命名小说"}」，番茄平台每个账号仅支持创建一本小说`,
+            `${accountLabel}已创建小说「${occupancy.novel_name || "未命名小说"}」，番茄账号仅支持创建一本小说`,
           )
           return
         }
@@ -729,7 +730,7 @@ export default function NewTaskPage() {
                     <p className="mt-1 text-xs text-slate-400">{confirmSkill.category}</p>
                   ) : null}
                   {confirmSkill.description ? (
-                    <p className="mt-2 line-clamp-3 text-xs leading-relaxed text-slate-500" title={confirmSkill.description}>
+                    <p className="mt-2 line-clamp-5 text-xs leading-relaxed text-slate-500" title={confirmSkill.description}>
                       {confirmSkill.description}
                     </p>
                   ) : null}
