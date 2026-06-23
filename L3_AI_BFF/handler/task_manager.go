@@ -302,6 +302,7 @@ func (tm *TaskManager) exitLoopAndRequeue(job *AutoPublishJob, err error) {
 
 	job.mu.Lock()
 	chapterNumber := job.ChapterNumber
+	workID := job.WorkID
 	job.mu.Unlock()
 
 	errMsg := err.Error()
@@ -314,9 +315,10 @@ func (tm *TaskManager) exitLoopAndRequeue(job *AutoPublishJob, err error) {
 			chapter_number=?,
 			chapters_this_batch=0,
 			error_message=?,
+			work_id=?,
 			updated_at=UTC_TIMESTAMP()
 		WHERE task_id=?
-	`, now, now, recoverableAt, chapterNumber, truncateStr(errMsg, 1000), job.TaskID)
+	`, now, now, recoverableAt, chapterNumber, truncateStr(errMsg, 1000), workID, job.TaskID)
 
 	tm.mu.Lock()
 	delete(tm.runningTasks, job.TaskID)
@@ -330,10 +332,14 @@ func (tm *TaskManager) exitLoopAndRequeue(job *AutoPublishJob, err error) {
 }
 
 func (tm *TaskManager) exitLoop(job *AutoPublishJob, newStatus string) {
+	job.mu.Lock()
+	workID := job.WorkID
+	job.mu.Unlock()
+
 	tm.db.Exec(`
-		UPDATE auto_publish_task SET status=?, last_executed_at=UTC_TIMESTAMP(), updated_at=UTC_TIMESTAMP()
+		UPDATE auto_publish_task SET status=?, work_id=?, last_executed_at=UTC_TIMESTAMP(), updated_at=UTC_TIMESTAMP()
 		WHERE task_id=?
-	`, newStatus, job.TaskID)
+	`, newStatus, workID, job.TaskID)
 
 	tm.mu.Lock()
 	delete(tm.runningTasks, job.TaskID)

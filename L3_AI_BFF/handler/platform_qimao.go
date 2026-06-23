@@ -211,19 +211,19 @@ func (p *QimaoPlatform) Finalize(job *AutoPublishJob) error {
 	apLogger.Printf(" task=%s ===== 开始生成章节(qimao, isFinale=true) =====", taskID)
 
 	bookID := job.WorkID
-	if bookID == "" {
-		platformInfo, pubErr := p.adapter.GetPlatformInfo(job.stopCtx, novelName, cred)
-		if pubErr != nil {
-			return fmt.Errorf("get platform info: %s (code=%s)", pubErr.ErrorMessage, pubErr.ErrorCode)
-		}
 
-		bookID = platformInfo.BookID
-		if !platformInfo.BookExists || bookID == "" {
-			bookID = p.ensureBookExists(job, cred, novelName)
-			if bookID == "" {
-				return fmt.Errorf("failed to get book_id for novel: %s", novelName)
-			}
+	platformInfo, pubErr := p.adapter.GetPlatformInfo(job.stopCtx, novelName, cred, bookID)
+	if pubErr != nil {
+		return fmt.Errorf("get platform info: %s (code=%s)", pubErr.ErrorMessage, pubErr.ErrorCode)
+	}
+
+	if !platformInfo.BookExists || platformInfo.BookID == "" {
+		bookID = p.ensureBookExists(job, cred, novelName)
+		if bookID == "" {
+			return fmt.Errorf("failed to get book_id for novel: %s", novelName)
 		}
+	} else {
+		bookID = platformInfo.BookID
 	}
 
 	chapters, chErr := p.adapter.GetChapterList(job.stopCtx, bookID, cred)
@@ -345,37 +345,33 @@ func (p *QimaoPlatform) phasePrepare(job *AutoPublishJob) *chapterGenState {
 	novelName := job.NovelName
 
 	bookID := job.WorkID
-	bookExists := bookID != ""
 
-	if !bookExists {
-		platformInfo, pubErr := p.adapter.GetPlatformInfo(job.stopCtx, novelName, cred)
-		if pubErr != nil {
-			apLogger.Printf(" task=%s get_platform_info失败(qimao): %s (code=%s)", taskID, pubErr.ErrorMessage, pubErr.ErrorCode)
-			return nil
-		}
-
-		bookID = platformInfo.BookID
-		bookExists = platformInfo.BookExists && bookID != ""
-
-		if !bookExists {
-			bookID = p.ensureBookExists(job, cred, novelName)
-			if bookID == "" {
-				apLogger.Printf(" task=%s 获取book_id失败(qimao)", taskID)
-				return nil
-			}
-		}
-
-		job.mu.Lock()
-		job.WorkID = bookID
-		job.mu.Unlock()
+	platformInfo, pubErr := p.adapter.GetPlatformInfo(job.stopCtx, novelName, cred, bookID)
+	if pubErr != nil {
+		apLogger.Printf(" task=%s get_platform_info失败(qimao): %s (code=%s)", taskID, pubErr.ErrorMessage, pubErr.ErrorCode)
+		return nil
 	}
 
-	apLogger.Printf(" task=%s 平台状态(qimao): bookId=%s bookExists=%v", taskID, bookID, bookExists)
+	if !platformInfo.BookExists || platformInfo.BookID == "" {
+		bookID = p.ensureBookExists(job, cred, novelName)
+		if bookID == "" {
+			apLogger.Printf(" task=%s 获取book_id失败(qimao)", taskID)
+			return nil
+		}
+	} else {
+		bookID = platformInfo.BookID
+	}
+
+	job.mu.Lock()
+	job.WorkID = bookID
+	job.mu.Unlock()
+
+	apLogger.Printf(" task=%s 平台状态(qimao): bookId=%s bookExists=%v", taskID, bookID, platformInfo.BookExists)
 
 	chapters, chErr := p.adapter.GetChapterList(job.stopCtx, bookID, cred)
 	if chErr != nil {
 		apLogger.Printf(" task=%s get_chapter_list失败(qimao): %s (code=%s)", taskID, chErr.ErrorMessage, chErr.ErrorCode)
-		if bookExists {
+		if platformInfo.BookExists {
 			job.mu.Lock()
 			job.WorkID = ""
 			job.mu.Unlock()

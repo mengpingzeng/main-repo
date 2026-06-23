@@ -159,12 +159,12 @@ func (a *QimaoPublishAdapter) Publish(ctx context.Context, product ProductConten
 }
 
 // GetPlatformInfo 获取七猫平台作品列表 + 建书选项。
-func (a *QimaoPublishAdapter) GetPlatformInfo(ctx context.Context, novelName, credentials string) (*QimaoOutput, *PublishResult) {
+func (a *QimaoPublishAdapter) GetPlatformInfo(ctx context.Context, novelName, credentials, bookId string) (*QimaoOutput, *PublishResult) {
 	if credentials == "" {
 		return nil, a.fail(ErrCodeCredentialFailed, "qimao cookie is empty", "")
 	}
 	novelName = sanitizeNovelName(novelName)
-	input := qimaoInput{Action: "get_platform_info", NovelName: novelName}
+	input := qimaoInput{Action: "get_platform_info", NovelName: novelName, BookID: bookId}
 	return a.execAndParse(ctx, input, credentials)
 }
 

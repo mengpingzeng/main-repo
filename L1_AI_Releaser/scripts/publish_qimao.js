@@ -394,8 +394,8 @@ async function doGetBookOption(cookieStr, input) {
 // ======================== Action: get_platform_info ========================
 
 async function doGetPlatformInfo(cookieStr, input) {
-    const { novelName } = input;
-    log('info', 'get_platform_info starting', { novelName });
+    const { novelName, bookId } = input;
+    log('info', 'get_platform_info starting', { novelName, bookId });
     const browser = await launchBrowser(); let page;
     try {
         page = await browser.newPage(); await page.setViewport(CONFIG.VIEWPORT);
@@ -412,8 +412,15 @@ async function doGetPlatformInfo(cookieStr, input) {
         }
 
         let foundBook = null;
-        for (const b of books) {
-            if (b.title === novelName) { foundBook = b; break; }
+
+        // 优先按 bookId 直达
+        if (bookId) {
+            foundBook = books.find(b => b.book_id === bookId) || null;
+        }
+
+        // 按书名前缀匹配兜底（覆盖备用名：原名/之续/新篇）
+        if (!foundBook) {
+            foundBook = books.find(b => b.title.startsWith(novelName)) || null;
         }
 
         const result = {
