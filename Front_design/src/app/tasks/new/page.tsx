@@ -100,7 +100,8 @@ function SkillCardSkeleton() {
       <div className={cn(SKILL_COVER, "shrink-0 bg-slate-200")} />
       <div className="px-3 py-2.5">
         <div className="h-4 bg-slate-200 rounded w-[90%]" />
-        <div className="mt-2 space-y-1.5">
+        <div className="mt-1 h-3 bg-slate-100 rounded w-[70%]" />
+        <div className="mt-1.5 space-y-1.5">
           <div className="h-3 bg-slate-100 rounded w-full" />
           <div className="h-3 bg-slate-100 rounded w-[85%]" />
         </div>
@@ -123,7 +124,7 @@ function SkillSelectCard({
       type="button"
       onClick={onToggle}
       className={cn(
-        "group relative flex flex-col rounded-xl border bg-white text-left transition-all",
+        "group relative flex min-w-0 flex-col rounded-xl border bg-white text-left transition-all",
         selected
           ? "border-orange-400 bg-orange-50"
           : "border-slate-200 hover:border-orange-300",
@@ -140,7 +141,7 @@ function SkillSelectCard({
         <SkillCoverImage src={coverUrl(skill.cover_image)} alt={skill.name} />
       </div>
 
-      <div className="px-3 py-2.5">
+      <div className="min-w-0 px-3 py-2.5">
         <h3
           className="truncate text-sm font-semibold leading-4 text-slate-900"
           title={skill.name}
@@ -148,8 +149,20 @@ function SkillSelectCard({
           {skill.name}
         </h3>
 
+        {skill.category ? (
+          <p
+            className="mt-1 line-clamp-1 text-[10px] leading-4 text-slate-400"
+            title={skill.category}
+          >
+            {skill.category}
+          </p>
+        ) : null}
+
         <p
-          className="mt-2 text-[11px] leading-relaxed text-slate-500 line-clamp-2"
+          className={cn(
+            "text-[11px] leading-relaxed text-slate-500 line-clamp-2",
+            skill.category ? "mt-1.5" : "mt-2",
+          )}
           title={skill.description}
         >
           {skill.description || "暂无简介"}

@@ -2,7 +2,7 @@
 export const IS_DEV_RUNTIME = process.env.NODE_ENV === "development"
 
 /** 生产环境内测限制 */
-export const PROD_MAX_USERS = 7
+export const PROD_MAX_USERS = 9
 export const PROD_MAX_ACCOUNTS_PER_PLATFORM = 1
 
 /** 生产环境是否启用内测人数/绑定限制 */
