@@ -40,8 +40,17 @@ slug_from_path() {
     local path="$1"
     local base
     base=$(basename "$path" .txt)
-    base=$(echo "$base" | tr '[:upper:]' '[:lower:]' | tr '[:space:]' '-')
-    base=$(echo "$base" | sed -E 's/[^a-z0-9_-]/-/g; s/-{2,}/-/g; s/^-//; s/-$//')
+    base=$(python3 -c "
+import re, sys
+s = sys.argv[1].strip()
+s = s.lower()
+s = re.sub(r'\s+', '-', s)
+# Keep Unicode word chars and hyphens; replace everything else
+s = re.sub(r'[^\w\-]', '-', s, flags=re.UNICODE)
+s = re.sub(r'-{2,}', '-', s)
+s = s.strip('-')
+print(s if s else 'unnamed')
+" "$base")
     echo "$base"
 }
 
@@ -214,6 +223,26 @@ validate_quiet() {
     [ -f "$dir/scripts/similarity_check.py" ] || ((errors++))
     [ -f "$dir/scripts/state_machine.py" ] || ((errors++))
     [ -f "$dir/cover.png" ] && [ "$(file_size "$dir/cover.png")" -gt 10240 ] || ((errors++))
+    [ -f "$dir/_meta.json" ] || ((errors++))
+    [ "$errors" -eq 0 ]
+}
+
+# 快速校验 (排除cover.png, 用于 retry-cover-only 模式判定)
+validate_except_cover() {
+    local dir="$1" errors=0
+    [ -d "$dir" ] || return 1
+    local files=(
+        SKILL.md README.md style_fingerprint.yaml outline.json
+        state.json summaries.md chapter_prompt.md self_check.md
+        novel_metadata.json
+    )
+    for f in "${files[@]}"; do
+        [ -f "$dir/$f" ] && [ "$(file_size "$dir/$f")" -gt 0 ] || ((errors++))
+    done
+    [ -d "$dir/chapters" ] || ((errors++))
+    [ -d "$dir/scripts" ] || ((errors++))
+    [ -f "$dir/scripts/similarity_check.py" ] || ((errors++))
+    [ -f "$dir/scripts/state_machine.py" ] || ((errors++))
     [ -f "$dir/_meta.json" ] || ((errors++))
     [ "$errors" -eq 0 ]
 }

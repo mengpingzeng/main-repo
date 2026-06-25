@@ -65,3 +65,4 @@ coverage.out
 *.temp
 tmp/
 temp/
+batch_progress.json

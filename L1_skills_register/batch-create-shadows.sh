@@ -11,8 +11,8 @@ source "$SCRIPT_DIR/shadow_utils.sh"
 
 # ---- 默认值 ----
 OUTPUT_DIR_DEFAULT="./shadow_output"
-PROGRESS_FILE_DEFAULT="./batch_progress.json"
 TIMEOUT_DEFAULT=2400
+LIMIT=""  # 空 = 处理全部; 数字 = 最多处理 N 部新小说（已跳过的跳过的不计入）
 MODEL="${SHADOW_OPENCODE_MODEL:-}"
 OPENAIDE_DIR="${SHADOW_OPENAIDE_DIR:-/home/main-repo}"
 GENERATE_COVER_SCRIPT="${SHADOW_COVER_SCRIPT:-$SCRIPT_DIR/../L1_novel_skill/scripts/generate_cover.py}"
@@ -41,11 +41,10 @@ show_help() {
 【选项】
   --list FILE          小说列表文件（每行一个 .txt 路径）[必填]
   --output-dir DIR     输出目录（默认: ./shadow_output）
-  --progress FILE      进度跟踪文件（默认: ./batch_progress.json）
   --timeout SECONDS    单部小说处理超时秒数（默认: 2400 = 40分钟）
+  --limit N             最多处理 N 部未完成的小说（已完成的跳过不计入）
   --model PROVIDER/MODEL  指定 opencode 使用的模型
-  --resume             从上次中断处续传（读取 progress 文件）
-  --retry-cover-only   仅重试封面生成失败的条目（不重新跑 AI）
+   --retry-cover-only   仅重试封面生成失败的条目（不重新跑 AI）
   --no-cover           跳过封面生成
   --help               显示本帮助
 
@@ -56,15 +55,13 @@ show_help() {
      Phase C: Skill 物化 (12 个文件产出)
      Phase D: 交付
   2. 自动校验 13 项产出文件
-  3. 若缺 cover.png → 自动调用 generate_cover.py 重试生图
-  4. 自动生成 _meta.json
-  5. 记录进度到 progress 文件
+3. 若缺 cover.png → 自动调用 generate_cover.py 重试生图
+4. 自动生成 _meta.json
 
-【续传与重试】
-  中断后可续传:
-    ./batch-create-shadows --list novels.txt --resume
-  仅重试失败的封面:
-    ./batch-create-shadows --list novels.txt --retry-cover-only
+【重试】
+   脚本自动跳过已完成的 shadow 目录，中断后直接重新运行即可。
+   仅重试失败的封面:
+     ./batch-create-shadows --list novels.txt --retry-cover-only
 
 【环境变量】
   SHADOW_OPENCODE_MODEL    指定模型 (如 deepseek/deepseek-v4-pro)
@@ -77,76 +74,16 @@ show_help() {
   # 准备小说列表
   find /data/public_domain -name '*.txt' > novels.txt
 
-  # 批量生成（首次运行）
-  ./batch-create-shadows --list novels.txt --output-dir ./my_shadows
+   # 批量生成（首次运行，中断后直接重跑即可，会自动跳过已完成条目）
+   ./batch-create-shadows --list novels.txt --output-dir ./my_shadows
 
-  # 中途断了？续传
-  ./batch-create-shadows --list novels.txt --resume
-
-  # 封面生成失败的？单独重试
-  ./batch-create-shadows --list novels.txt --retry-cover-only
+   # 封面生成失败的？单独重试
+   ./batch-create-shadows --list novels.txt --retry-cover-only
 
   # 全部生成完后，注册到 skill_registry
   ls -d ./my_shadows/*-shadow/ > to_register.txt
   ./register-shadow --batch to_register.txt
 EOF
-}
-
-# ---- 进度文件操作 ----
-progress_load() {
-    local f="$1"
-    [ -f "$f" ] && python3 -c "import json; print(json.dumps(json.load(open('$f'))))" 2>/dev/null || echo '{"novels":{}}'
-}
-
-progress_is_done() {
-    local prog="$1" novel="$2"
-    local status
-    status=$(python3 -c "
-import json, sys
-d=json.loads('''$prog''')
-print(d.get('novels',{}).get('$novel',{}).get('status',''))
-" 2>/dev/null)
-    [ "$status" = "done" ]
-}
-
-progress_is_cover_failed() {
-    local prog="$1" novel="$2"
-    local status
-    status=$(python3 -c "
-import json
-d=json.loads('''$prog''')
-print(d.get('novels',{}).get('$novel',{}).get('status',''))
-" 2>/dev/null)
-    [ "$status" = "cover_failed" ]
-}
-
-progress_save() {
-    local prog_file="$1" novel="$2" status="$3"
-    python3 -c "
-import json, os, sys
-
-prog_file = '$prog_file'
-novel = '$novel'
-status = '$status'
-
-data = {'novels': {}}
-if os.path.exists(prog_file):
-    try:
-        with open(prog_file) as f:
-            data = json.load(f)
-    except:
-        pass
-
-data.setdefault('novels', {})
-data['novels'][novel] = data['novels'].get(novel, {})
-data['novels'][novel]['status'] = status
-data['novels'][novel]['updated_at'] = __import__('datetime').datetime.now().isoformat()
-
-with open(prog_file, 'w') as f:
-    json.dump(data, f, ensure_ascii=False, indent=2)
-    f.write('\n')
-"
-    return 0
 }
 
 # ---- 封面生成 ----
@@ -200,10 +137,24 @@ process_novel() {
     local novel_path="$1" output_dir="$2" no_cover="$3"
 
     local novel_name=$(basename "$novel_path" .txt)
+    local log_file="$output_dir/logs/opencode.log"
 
     heading "处理: $novel_name"
     info "源文件: $novel_path"
     info "输出目录: $output_dir"
+
+    # 创建输出目录和日志目录
+    mkdir -p "$output_dir/logs"
+
+    # 写入运行信息头
+    {
+        echo "=== opencode run started at $(date -Iseconds) ==="
+        echo "Novel: $novel_path"
+        echo "Output: $output_dir"
+        echo "Model: ${MODEL:-default}"
+        echo "Timeout: ${TIMEOUT}s"
+        echo ""
+    } >> "$log_file"
 
     # 构建 opencode prompt
     local prompt="使用 novel-shadow-creator 技能处理公版小说。
@@ -229,7 +180,7 @@ process_novel() {
     fi
 
     # 调用 opencode
-    info "启动 opencode..."
+    info "启动 opencode (日志: $log_file)..."
     local opencode_args=(run --dir "$OPENAIDE_DIR")
     [ -n "$MODEL" ] && opencode_args+=(--model "$MODEL")
     opencode_args+=(--dangerously-skip-permissions)
@@ -237,16 +188,33 @@ process_novel() {
     opencode_args+=(--file "$novel_path")
 
     local start_time=$(date +%s)
+    local opencode_rc=0
 
-    # 使用 timeout 包裹，超时自动杀
-    run_with_timeout "$TIMEOUT" opencode "${opencode_args[@]}" </dev/null
-    local exit_code=$?
+    # 使用 timeout 包裹，输出同时到终端和日志文件
+    # 日志文件通过 perl 剥离 ANSI 转义码，终端保持原样
+    set +o pipefail
+    timeout --kill-after=10 "$TIMEOUT" opencode "${opencode_args[@]}" 2>&1 </dev/null \
+        | tee -a "$log_file"
+    opencode_rc=${PIPESTATUS[0]}
+    set -o pipefail
+    # 剥离日志文件中的 ANSI 转义码
+    if [ -f "$log_file" ]; then
+        perl -i -pe 's/\x1b\[[0-9;]*[a-zA-Z]//g' "$log_file"
+    fi
 
     local elapsed=$(($(date +%s) - start_time))
-    info "opencode 退出码: $exit_code (耗时 ${elapsed}s)"
 
-    if [ $exit_code -eq 124 ]; then
-        fail "超时 (${TIMEOUT}s)，open代码进程已终止"
+    {
+        echo ""
+        echo "=== opencode run finished at $(date -Iseconds) ==="
+        echo "Exit code: $opencode_rc"
+        echo "Elapsed: ${elapsed}s"
+    } >> "$log_file"
+
+    info "opencode 退出码: $opencode_rc (耗时 ${elapsed}s)"
+
+    if [ $opencode_rc -eq 124 ]; then
+        fail "超时 (${TIMEOUT}s)，opencode 进程已终止"
         # 确保彻底清理
         pkill -f "opencode run" 2>/dev/null || true
         sleep 1
@@ -258,8 +226,8 @@ process_novel() {
 
 # ---- 主逻辑 ----
 main() {
-    local LIST_FILE="" OUTPUT_DIR="$OUTPUT_DIR_DEFAULT" PROGRESS_FILE="$PROGRESS_FILE_DEFAULT"
-    local TIMEOUT="$TIMEOUT_DEFAULT" RESUME=false RETRY_COVER_ONLY=false NO_COVER=false
+    local LIST_FILE="" OUTPUT_DIR="$OUTPUT_DIR_DEFAULT"
+    local TIMEOUT="$TIMEOUT_DEFAULT" RETRY_COVER_ONLY=false NO_COVER=false
     local mode="full"
 
     # 解析参数
@@ -268,10 +236,9 @@ main() {
             --help|-h)   show_help; exit 0 ;;
             --list)      LIST_FILE="$2"; shift 2 ;;
             --output-dir) OUTPUT_DIR="$2"; shift 2 ;;
-            --progress)  PROGRESS_FILE="$2"; shift 2 ;;
             --timeout)   TIMEOUT="$2"; shift 2 ;;
+            --limit)     LIMIT="$2"; shift 2 ;;
             --model)     MODEL="$2"; shift 2 ;;
-            --resume)    RESUME=true; shift ;;
             --retry-cover-only) RETRY_COVER_ONLY=true; shift ;;
             --no-cover)  NO_COVER=true; shift ;;
             *) fail "未知参数: $1 (用 --help 查看帮助)"; exit 1 ;;
@@ -303,34 +270,26 @@ main() {
 
     [ ${#novels[@]} -gt 0 ] || die "列表中没有找到有效的小说文件"
 
+    # 校验 --limit
+    if [ -n "$LIMIT" ]; then
+        if ! [[ "$LIMIT" =~ ^[0-9]+$ ]] || [ "$LIMIT" -le 0 ]; then
+            fail "--limit 必须为正整数"
+            exit 1
+        fi
+    fi
+
     heading "批量生成 shadow 技能"
     info "共 ${#novels[@]} 部小说"
     info "输出目录: $OUTPUT_DIR"
-    info "进度文件: $PROGRESS_FILE"
     info "单部超时: ${TIMEOUT}s"
+    [ -n "$LIMIT" ] && info "处理上限: 最多 ${LIMIT} 部（已完成跳过不计入）"
     [ -n "$MODEL" ] && info "模型: $MODEL"
-    [ "$RESUME" = true ] && info "模式: 续传"
     [ "$RETRY_COVER_ONLY" = true ] && info "模式: 仅封面重试"
     [ "$NO_COVER" = true ] && warn "封面生成已禁用"
 
-    # 加载进度
-    local progress_data
-    progress_data=$(progress_load "$PROGRESS_FILE")
-
-    # 预检查 (仅非 retry 模式)
-    if [ "$RETRY_COVER_ONLY" = false ]; then
-        for novel in "${novels[@]}"; do
-            if progress_is_done "$progress_data" "$novel"; then
-                local n=$(basename "$novel")
-                if [ "$RESUME" = true ] || [ -d "$OUTPUT_DIR/${n%.txt}-shadow" ]; then
-                    skip "$n (已完成, 跳过)"
-                fi
-            fi
-        done
-    fi
-
     local total=${#novels[@]}
     local done_count=0 skip_count=0 fail_count=0 cover_fail=0
+    local processed_count=0  # 实际处理的部数（成功+失败，跳过的不计）
     local start_all=$(date +%s)
 
     for novel in "${novels[@]}"; do
@@ -341,50 +300,50 @@ main() {
 
         echo ""
 
-        # ---- 续传跳过 ----
-        if [ "$RETRY_COVER_ONLY" = false ]; then
-            if progress_is_done "$progress_data" "$novel"; then
-                if [ "$RESUME" = true ]; then
-                    skip "$novel_name (已完成)"
-                    ((skip_count++)) || true
-                    continue
-                fi
-            fi
-        fi
-
         # ---- 仅封面重试 ----
         if [ "$RETRY_COVER_ONLY" = true ]; then
-            if ! progress_is_cover_failed "$progress_data" "$novel"; then
-                skip "$novel_name (非封面失败)"
+            if [ ! -d "$shadow_dir" ] || ! validate_except_cover "$shadow_dir"; then
+                skip "$novel_name (shadow目录不存在或核心文件不完整)"
                 ((skip_count++)) || true
                 continue
             fi
-            # 检查是否有 shadow 目录
-            if [ ! -d "$shadow_dir" ]; then
-                fail "$novel_name: shadow 目录不存在, 无法重试封面"
-                ((fail_count++)) || true
+            if [ -f "$shadow_dir/cover.png" ] && [ "$(file_size "$shadow_dir/cover.png")" -gt 10240 ]; then
+                skip "$novel_name (封面已正常)"
+                ((skip_count++)) || true
                 continue
             fi
             info "重试封面: $novel_name"
             if retry_cover "$shadow_dir"; then
-                progress_save "$PROGRESS_FILE" "$novel" "done"
                 ok "$novel_name (封面已修复)"
                 ((done_count++)) || true
             else
                 fail "$novel_name (封面重试失败)"
                 ((cover_fail++)) || true
             fi
+            ((processed_count++)) || true
+            if [ -n "$LIMIT" ] && [ "$processed_count" -ge "$LIMIT" ]; then
+                info "已达处理上限 (${LIMIT}部)，停止"
+                break
+            fi
             continue
         fi
 
         # ---- 完整处理 ----
-        [ -f "$novel" ] || { fail "$novel_name: 源文件已不存在"; ((fail_count++)); continue; }
+        [ -f "$novel" ] || {
+            fail "$novel_name: 源文件已不存在"
+            ((fail_count++)) || true
+            ((processed_count++)) || true
+            if [ -n "$LIMIT" ] && [ "$processed_count" -ge "$LIMIT" ]; then
+                info "已达处理上限 (${LIMIT}部)，停止"
+                break
+            fi
+            continue
+        }
 
         # 检查 shadow 目录
-        if [ -d "$shadow_dir" ] && [ "$RESUME" = false ]; then
+        if [ -d "$shadow_dir" ]; then
             if validate_quiet "$shadow_dir"; then
                 skip "$novel_name (shadow 目录已存在且完整)"
-                progress_save "$PROGRESS_FILE" "$novel" "done"
                 ((skip_count++)) || true
                 continue
             else
@@ -392,12 +351,14 @@ main() {
             fi
         fi
 
-        # 标记开始
-        progress_save "$PROGRESS_FILE" "$novel" "in_progress"
-
         # 调用 opencode
         process_novel "$novel" "$shadow_dir" "$NO_COVER"
         local process_rc=$?
+
+        # 生成 _meta.json (如果缺失) — 必须在校验之前
+        if [ ! -f "$shadow_dir/_meta.json" ]; then
+            generate_meta_json "$shadow_dir" "${slug}-shadow"
+        fi
 
         # 校验产出
         local validation_ok=true
@@ -415,7 +376,9 @@ main() {
                 # 尝试封面重试
                 if [ -f "$GENERATE_COVER_SCRIPT" ]; then
                     info "封面缺失, 尝试自动生成..."
-                    if ! retry_cover "$shadow_dir"; then
+                    if retry_cover "$shadow_dir"; then
+                        validation_ok=true
+                    else
                         cover_ok=false
                     fi
                 else
@@ -424,24 +387,23 @@ main() {
             fi
         fi
 
-        # 生成 _meta.json (如果缺失)
-        if [ ! -f "$shadow_dir/_meta.json" ]; then
-            generate_meta_json "$shadow_dir" "${slug}-shadow"
-        fi
-
         # 最终状态
         if [ "$validation_ok" = true ] && [ "$cover_ok" = true ]; then
-            progress_save "$PROGRESS_FILE" "$novel" "done"
             ok "$novel_name → $(basename "$shadow_dir")"
             ((done_count++)) || true
         elif [ "$validation_ok" = true ] && [ "$cover_ok" = false ]; then
-            progress_save "$PROGRESS_FILE" "$novel" "cover_failed"
             warn "$novel_name (封面生成失败, 可用 --retry-cover-only 重试)"
             ((cover_fail++)) || true
         else
-            progress_save "$PROGRESS_FILE" "$novel" "failed"
             fail "$novel_name (校验未通过)"
             ((fail_count++)) || true
+        fi
+
+        # 成功或失败都算已处理（跳过的不计）
+        ((processed_count++)) || true
+        if [ -n "$LIMIT" ] && [ "$processed_count" -ge "$LIMIT" ]; then
+            info "已达处理上限 (${LIMIT}部)，停止"
+            break
         fi
 
     done
@@ -457,6 +419,9 @@ main() {
     [ "$cover_fail" -gt 0 ] && echo "  封面失败: ${C_YELLOW}${cover_fail}${C_RESET}"
     [ "$fail_count" -gt 0 ] && echo "  失败: ${C_RED}${fail_count}${C_RESET}"
     echo "  耗时: ${total_elapsed}s"
+    if [ -n "$LIMIT" ] && [ "$processed_count" -ge "$LIMIT" ]; then
+        echo "  (已达处理上限 ${LIMIT} 部，提前停止；列表其余条目未处理)"
+    fi
     echo ""
     if [ "$cover_fail" -gt 0 ]; then
         tip "封面失败的条目, 可运行: ./batch-create-shadows --list $LIST_FILE --retry-cover-only"
