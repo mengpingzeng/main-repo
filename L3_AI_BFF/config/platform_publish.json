@@ -6,7 +6,7 @@
     },
     "qimao": {
       "max_chapters_per_batch": 5,
-      "requeue_interval_hours": 1
+      "requeue_interval_hours": 8
     }
   }
 }

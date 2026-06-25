@@ -197,7 +197,10 @@ func (p *FanqiePlatform) Finalize(job *AutoPublishJob) error {
 
 	apLogger.Printf(" task=%s ===== 开始生成章节 (isFinale=true) =====", taskID)
 
-	platformInfo, pubErr := p.adapter.GetPlatformInfo(job.stopCtx, novelName, cred, job.WorkID)
+	var altNames []string
+	_, _, _, _, altNames, _, _ = p.mgr.fetchSkillMeta(job.SkillID)
+
+	platformInfo, pubErr := p.adapter.GetPlatformInfo(job.stopCtx, novelName, cred, job.WorkID, altNames)
 	if pubErr != nil {
 		return fmt.Errorf("get platform info: %s (code=%s)", pubErr.ErrorMessage, pubErr.ErrorCode)
 	}
@@ -315,7 +318,13 @@ func (p *FanqiePlatform) Finalize(job *AutoPublishJob) error {
 
 	apLogger.Printf(" task=%s AI 生成完成: title=%s contentLen=%d", taskID, chapterTitle, len(draft))
 
-	if chapterTitle == "" {
+	_, _, _, _, _, chapterNames, fetchErr := p.mgr.fetchSkillMeta(job.SkillID)
+	if fetchErr != nil {
+		apLogger.Printf(" task=%s 获取chapterNames失败: %v", taskID, fetchErr)
+	}
+	if nextChapter-1 < len(chapterNames) && chapterNames[nextChapter-1] != "" {
+		chapterTitle = chapterNames[nextChapter-1]
+	} else if chapterTitle == "" {
 		chapterTitle = fallbackChapterTitle(draft)
 		apLogger.Printf(" task=%s 标题为空，从正文生成兜底标题: %s", taskID, chapterTitle)
 	}
@@ -353,7 +362,7 @@ func (p *FanqiePlatform) Finalize(job *AutoPublishJob) error {
 
 	draftItemID := saveResult.DraftItemID
 	if draftItemID == "" {
-		platformInfo2, pubErr2 := p.adapter.GetPlatformInfo(job.stopCtx, novelName, cred, job.WorkID)
+		platformInfo2, pubErr2 := p.adapter.GetPlatformInfo(job.stopCtx, novelName, cred, job.WorkID, nil)
 		if pubErr2 != nil {
 			apLogger.Printf(" task=%s 获取平台状态失败(发布前): %s", taskID, pubErr2.ErrorMessage)
 		} else {
@@ -419,7 +428,14 @@ func (p *FanqiePlatform) phasePrepare(job *AutoPublishJob) *chapterGenState {
 	taskID := job.TaskID
 	novelName := job.NovelName
 
-	platformInfo, pubErr := p.adapter.GetPlatformInfo(job.stopCtx, novelName, cred, job.WorkID)
+	var altNames []string
+	_, _, _, _, altNames, _, fetchErr := p.mgr.fetchSkillMeta(job.SkillID)
+	if fetchErr != nil {
+		apLogger.Printf(" task=%s fetchSkillMeta获取titles失败: %v", taskID, fetchErr)
+	}
+	apLogger.Printf(" task=%s phasePrepare altNames=%v", taskID, altNames)
+
+	platformInfo, pubErr := p.adapter.GetPlatformInfo(job.stopCtx, novelName, cred, job.WorkID, altNames)
 	if pubErr != nil {
 		apLogger.Printf(" task=%s get_platform_info失败: %s (code=%s)", taskID, pubErr.ErrorMessage, pubErr.ErrorCode)
 		return nil
@@ -560,7 +576,7 @@ func (p *FanqiePlatform) phasePublishDraft(job *AutoPublishJob, state *chapterGe
 
 	draftItemID := state.draftItemID
 	if draftItemID == "" {
-		platformInfo2, pubErr2 := p.adapter.GetPlatformInfo(job.stopCtx, job.NovelName, state.cred, job.WorkID)
+		platformInfo2, pubErr2 := p.adapter.GetPlatformInfo(job.stopCtx, job.NovelName, state.cred, job.WorkID, nil)
 		if pubErr2 != nil {
 			apLogger.Printf(" task=%s 获取平台状态失败(发布前): %s", taskID, pubErr2.ErrorMessage)
 		} else {
@@ -691,7 +707,7 @@ func (p *FanqiePlatform) isAlreadyPublished(lastPublished *c1.FanqieLastPublishe
 
 // setNewBookInfo 从 skill 元数据中提取书籍信息并调用 SetBookInfo 上传封面和设置分类/简介。
 func (p *FanqiePlatform) setNewBookInfo(job *AutoPublishJob, cred string, platformInfo *c1.PlatformInfo, novelName string) {
-	name, description, category, roles, fetchErr := p.mgr.fetchSkillMeta(job.SkillID)
+	name, description, category, roles, _, _, fetchErr := p.mgr.fetchSkillMeta(job.SkillID)
 	if fetchErr != nil {
 		apLogger.Printf(" task=%s 获取skill元信息失败: %v", job.TaskID, fetchErr)
 		return
@@ -754,7 +770,7 @@ func (p *FanqiePlatform) retrySaveAndPublish(job *AutoPublishJob, sessionID, dra
 
 	fullTitle := fmt.Sprintf("第%d章 %s", chapterNum, chapterTitle)
 
-	platformInfo, pubErr := p.adapter.GetPlatformInfo(job.stopCtx, novelName, cred, job.WorkID)
+	platformInfo, pubErr := p.adapter.GetPlatformInfo(job.stopCtx, novelName, cred, job.WorkID, nil)
 	var volumeId, apiVolumeName string
 	apiVolumeName = volume
 	if pubErr == nil {
@@ -781,7 +797,7 @@ func (p *FanqiePlatform) retrySaveAndPublish(job *AutoPublishJob, sessionID, dra
 
 	draftItemID := saveResult.DraftItemID
 	if draftItemID == "" {
-		platformInfo2, pubErr2 := p.adapter.GetPlatformInfo(job.stopCtx, novelName, cred, job.WorkID)
+		platformInfo2, pubErr2 := p.adapter.GetPlatformInfo(job.stopCtx, novelName, cred, job.WorkID, nil)
 		if pubErr2 == nil {
 			for _, d := range platformInfo2.Drafts {
 				if d.ChapterNumber == chapterNum {

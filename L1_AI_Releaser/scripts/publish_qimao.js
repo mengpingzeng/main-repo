@@ -491,6 +491,12 @@ async function doCreateBook(cookieStr, input) {
 
         const bookId = (result.json && result.json.data && result.json.data.book_id) ? result.json.data.book_id : '';
         if (!bookId) {
+            const code = (result.json && result.json.code) || (result.json && result.json.errors && result.json.errors.code) || 0;
+            const msg  = (result.json && result.json.msg)  || '';
+            if (code == 40003009 || (typeof msg === 'string' && msg.includes('已存在'))) {
+                log('warn', 'create book: name conflict', { response: result.json });
+                return { success: false, action: 'create_book', error: '书名已存在', errorCode: '40003009' };
+            }
             log('warn', 'create book: no book_id in response', { response: result.json });
             return { success: false, action: 'create_book', error: 'no book_id in response' };
         }

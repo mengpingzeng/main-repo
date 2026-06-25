@@ -48,7 +48,7 @@ func Setup(cfg *config.Config, autoPubMgr *handler.AutoPublishManager, taskMgr *
 			taskGroup.POST("/:tid/message", handler.TaskMessage(cfg.SessionMgrURL))
 			taskGroup.GET("/:tid/sessions", handler.TaskSessions(cfg.SessionMgrURL))
 			taskGroup.GET("/:tid", handler.GetTask(cfg.SessionMgrURL))
-			taskGroup.GET("/:tid/book/info", handler.BookGetInfo(cfg.SessionMgrURL))
+			taskGroup.GET("/:tid/book/info", handler.BookGetInfo(cfg.SessionMgrURL, cfg.SkillRegistryURL))
 			taskGroup.GET("/:tid/book/content", handler.BookGetContent(cfg.SessionMgrURL))
 			taskGroup.GET("/:tid/publish/list", handler.GetTaskPublishList(cfg.C2DashboardURL))
 			taskGroup.POST("/:tid/update", handler.TaskUpdate(cfg.SessionMgrURL))

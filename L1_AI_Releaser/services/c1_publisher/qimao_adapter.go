@@ -89,6 +89,7 @@ type QimaoOutput struct {
 	Success       bool                 `json:"success"`
 	Action        string               `json:"action"`
 	Error         string               `json:"error"`
+	ErrorCode     string               `json:"errorCode"`
 	BookID        string               `json:"bookId"`
 	BookName      string               `json:"bookName"`
 	BookExists    bool                 `json:"bookExists"`
@@ -276,7 +277,11 @@ func (a *QimaoPublishAdapter) CreateBook(ctx context.Context, credentials, novel
 		return a.fail(ErrCodePlatformError, err.Error(), "")
 	}
 	if !output.Success {
-		return a.fail(ErrCodePlatformError, output.Error, "")
+		errCode := ErrCodePlatformError
+		if output.ErrorCode != "" {
+			errCode = output.ErrorCode
+		}
+		return a.fail(errCode, output.Error, "")
 	}
 
 	log.Printf("[qimao] CreateBook success: bookId=%s novelName=%s", output.BookID, novelName)

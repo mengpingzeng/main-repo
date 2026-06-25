@@ -161,7 +161,7 @@ async function doSaveDraft(cookieStr, input) {
     try {
         page = await browser.newPage(); await page.setViewport(CONFIG.VIEWPORT);
         await loginAndNavigate(page, cookieStr);
-        if (workId) { await enterNovelByWorkId(page, workId, novelName); } else { await findAndEnterNovel(page, novelName); }
+        if (workId) { await enterNovelByWorkId(page, workId, novelName); } else { await findAndEnterNovel(page, novelName, input.altNames); }
         await sleep(2000); await dismissPopups(page); await sleep(1000);
         let effectiveChapterNumber = chapterNumber || 1;
 
@@ -361,22 +361,27 @@ async function doGetPlatformInfo(cookieStr, input) {
             wkId = input.workId;
         } else {
             await sleep(3000); await dismissPopups(page); await sleep(1000);
-            newlyCreated = await findAndEnterNovel(page, novelName);
-            wkId = await getWorkId(page);
+            const enterResult = await findAndEnterNovel(page, novelName, input.altNames);
+            newlyCreated = enterResult.newlyCreated;
+            const foundBookName = enterResult.bookName;
+            wkId = enterResult.workId;
+            if (!wkId) {
+                wkId = await getWorkId(page);
+            }
             if (!wkId) {
                 await clickButton(page, ['作品管理', '我的作品', '作品']); await sleep(2000);
                 wkId = await page.evaluate((name) => {
                     const rows = document.querySelectorAll('tr, li, div[class*="row"], div[class*="item"], div[class*="card"]');
                     for (const row of rows) { if (row.textContent && row.textContent.includes(name)) { const links = row.querySelectorAll('a[href*="/writer/"]'); for (const link of links) { const m = (link.getAttribute('href') || '').match(/writer\/(\d+)/); if (m) return m[1]; } } }
                     return null;
-                }, novelName);
-                if (wkId) { await clickChapterManagement(page, novelName); await sleep(2000); }
+                }, foundBookName);
+                if (wkId) { await clickChapterManagement(page, foundBookName); await sleep(2000); }
             }
             log('info', 'workId extracted', { workId: wkId });
             bookName = await page.evaluate(() => {
                 const m = window.location.href.match(/chapter-manage\/\d+&([^?]+)/);
                 return m ? decodeURIComponent(m[1]) : null;
-            }) || novelName;
+            }) || foundBookName;
         }
         let chapterData = { chapters: [], lastPublished: null }; let volumeData = []; let drafts = [];
         if (wkId) {
@@ -529,7 +534,7 @@ async function doPublishDraft(cookieStr, input) {
             }
         } else {
             await loginAndNavigate(page, cookieStr);
-            if (input.workId) { await enterNovelByWorkId(page, input.workId, novelName); } else { await findAndEnterNovel(page, novelName); }
+            if (input.workId) { await enterNovelByWorkId(page, input.workId, novelName); } else { await findAndEnterNovel(page, novelName, input.altNames); }
             await sleep(2000); await dismissPopups(page); await sleep(1000);
             await clickButton(page, ['草稿箱', '草稿', '草稿管理', '我的草稿']);
             await sleep(3000); await dismissPopups(page); await sleep(1000);
@@ -915,7 +920,7 @@ async function doPublish(cookieStr, input) {
             log('info', 'novel found, entering chapter management', { novelName });
             await clickChapterManagement(page, novelName);
         } else {
-            log('info', 'novel not found, creating new via direct URL', { novelName });
+            log('info', 'novel not found, creating new via direct URL', { novelName, altNames: input.altNames });
 
             // Navigate directly to the novel creation page
             await page.goto('https://fanqienovel.com/main/writer/create', { waitUntil: 'domcontentloaded', timeout: CONFIG.NAVIGATION_TIMEOUT });
@@ -941,10 +946,16 @@ async function doPublish(cookieStr, input) {
             let createdWorkId = await createNovelViaForm(page, novelName);
 
             // Name conflict retry with alt names
-            const altNames = [novelName + '之续', novelName + '新篇'];
+            const altNames = (input.altNames && input.altNames.length)
+                ? input.altNames.filter(n => n !== novelName)
+                : [];
+            const fallbackNames = [novelName + '之续', novelName + '新篇'];
+            const candidates = altNames.length
+                ? altNames.concat(fallbackNames)
+                : fallbackNames;
             let altIdx = 0;
-            while (!createdWorkId && altIdx < altNames.length) {
-                const altName = altNames[altIdx];
+            while (!createdWorkId && altIdx < candidates.length) {
+                const altName = candidates[altIdx];
                 altIdx++;
                 log('info', 'retrying novel creation with alt name', { altName });
                 // Navigate back to create page and retry
@@ -1311,72 +1322,89 @@ async function loginAndNavigate(page, cookieStr) {
 }
 
 /**
+ * 通过 fetch API 创建新书，返回 { code, book_id }。
+ * code=0 成功，code=-2006 书名冲突。
+ */
+async function createNovelViaAPI(page, bookName) {
+    const msToken = await getMsToken(page);
+    return page.evaluate(async (name, token) => {
+        const body = new URLSearchParams({
+            aid: 2503,
+            app_name: 'muye_novel',
+            book_name: name,
+            roles: '[]',
+            category: '',
+            gender: 2,
+            thumb_uri: 'novel-pic-r/9159203ca7c834dbfc1178d147ae6d91',
+            abstract: '新作品出炉，欢迎大家前往番茄小说阅读我的作品，希望大家能够喜欢，你们的关注是我写作的动力，我会努力讲好每个故事！',
+            activity_id: 0,
+            is_self_pic: 0,
+        });
+        const url = 'https://fanqienovel.com/api/author/book/create/v0/?msToken=' + encodeURIComponent(token);
+        const resp = await fetch(url, {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: body.toString()
+        });
+        const data = await resp.json();
+        return { code: data.code, book_id: data.data?.book_id || '', message: data.message };
+    }, bookName, msToken);
+}
+
+/**
  * 按作品名查找并进入章节管理页面。
  * 组合了 findNovelByName + clickChapterManagement，找不到则新建作品。
  */
-async function findAndEnterNovel(page, novelName) {
+async function findAndEnterNovel(page, novelName, altNamesParam) {
     let foundNovel = await findNovelByName(page, novelName);
     if (foundNovel) {
         log('info', 'novel found, entering chapter management', { novelName });
         await clickChapterManagement(page, novelName);
-        return false;
+        return { newlyCreated: false, bookName: novelName, workId: null };
     }
 
-    log('info', 'novel not found, creating new via direct URL', { novelName });
+    log('info', 'novel not found, creating via API', { novelName, altNames: altNamesParam });
 
-    await page.goto('https://fanqienovel.com/main/writer/create', { waitUntil: 'domcontentloaded', timeout: CONFIG.NAVIGATION_TIMEOUT });
-    await sleep(5000);
+    let apiResult = await createNovelViaAPI(page, novelName);
+    let createdWorkId = apiResult.book_id;
+    let finalBookName = novelName;
 
-    page.setDefaultTimeout(60000);
-
-    try {
-        await page.waitForFunction(() => {
-            const el = document.querySelector('input[placeholder*="作品名称"]');
-            return el && el.offsetParent !== null;
-        }, { timeout: 60000 });
-    } catch (e) {
-        log('warn', 'create form not ready after 60s, continuing anyway');
-    }
-
-    await dismissWelcomeModal(page);
-
-    let createdWorkId = await createNovelViaForm(page, novelName);
-
-    const altNames = [novelName + '之续', novelName + '新篇'];
-    let altIdx = 0;
-    while (!createdWorkId && altIdx < altNames.length) {
-        const altName = altNames[altIdx];
-        altIdx++;
-        log('info', 'retrying novel creation with alt name', { altName });
-        await page.goto('https://fanqienovel.com/main/writer/create', { waitUntil: 'domcontentloaded', timeout: CONFIG.NAVIGATION_TIMEOUT });
-        await sleep(3000);
-        await dismissWelcomeModal(page);
-        await createNovelViaForm(page, altName);
-        createdWorkId = await getWorkId(page);
-        if (createdWorkId) {
-            log('info', 'novel created with alt name', { altName, workId: createdWorkId });
-            break;
-        }
-    }
-
-    if (createdWorkId) {
-        log('info', 'novel created successfully', { novelName, workId: createdWorkId });
+    if (apiResult.code === 0 && createdWorkId) {
+        log('info', 'novel created via API', { novelName, workId: createdWorkId });
     } else {
-        log('warn', 'novel creation verification failed, searching for novel');
-        await page.goto('https://fanqienovel.com/main/writer/', { waitUntil: 'domcontentloaded', timeout: CONFIG.NAVIGATION_TIMEOUT });
-        await sleep(3000);
-        await dismissWelcomeModal(page);
-        await clickButton(page, ['作品管理']);
-        await sleep(2000);
-        foundNovel = await findNovelByName(page, novelName);
-        if (foundNovel) {
-            log('info', 'novel found after creation, using existing', { novelName });
-            await clickChapterManagement(page, novelName);
-        } else {
-            throw new Error('无法创建或找到作品: ' + novelName);
+        const inputAltNames = (altNamesParam && altNamesParam.length)
+            ? altNamesParam.filter(n => n !== novelName)
+            : [];
+        const fallbackNames = [novelName + '之续', novelName + '新篇'];
+        const candidates = inputAltNames.length
+            ? inputAltNames.concat(fallbackNames)
+            : fallbackNames;
+        let altIdx = 0;
+        while (!createdWorkId && altIdx < candidates.length) {
+            const altName = candidates[altIdx];
+            altIdx++;
+            log('info', 'retrying novel creation with alt name', { altName });
+            apiResult = await createNovelViaAPI(page, altName);
+            if (apiResult.code === 0 && apiResult.book_id) {
+                createdWorkId = apiResult.book_id;
+                finalBookName = altName;
+                log('info', 'novel created via API', { altName, workId: createdWorkId });
+                break;
+            }
+            if (apiResult.code !== -2006) {
+                log('warn', 'create book API unexpected error', { altName, code: apiResult.code, message: apiResult.message });
+                break;
+            }
+            log('info', 'name conflict, trying next', { altName });
         }
     }
-    return true;
+
+    if (!createdWorkId) {
+        throw new Error('无法创建或找到作品: ' + novelName);
+    }
+
+    return { newlyCreated: true, bookName: finalBookName, workId: createdWorkId };
 }
 
 /**

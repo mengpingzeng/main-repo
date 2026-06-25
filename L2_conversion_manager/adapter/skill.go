@@ -19,6 +19,7 @@ type SkillDef struct {
 	StyleRules       []string
 	Constraints      []string
 	RawContent       string
+	ChapterNames     []string
 }
 
 var PrebuiltSkills = map[string]SkillDef{

@@ -287,7 +287,14 @@ func (p *QimaoPlatform) Finalize(job *AutoPublishJob) error {
 	job.mu.Unlock()
 
 	apLogger.Printf(" task=%s AI 生成完成(qimao): title=%s contentLen=%d", taskID, chapterTitle, len(draft))
-	if chapterTitle == "" {
+
+	_, _, _, _, _, chapterNames, fetchErr := p.mgr.fetchSkillMeta(job.SkillID)
+	if fetchErr != nil {
+		apLogger.Printf(" task=%s 获取chapterNames失败(qimao): %v", taskID, fetchErr)
+	}
+	if nextChapter-1 < len(chapterNames) && chapterNames[nextChapter-1] != "" {
+		chapterTitle = chapterNames[nextChapter-1]
+	} else if chapterTitle == "" {
 		chapterTitle = fallbackChapterTitle(draft)
 	}
 
@@ -493,7 +500,7 @@ func (p *QimaoPlatform) phasePublishDraft(job *AutoPublishJob, state *chapterGen
 func (p *QimaoPlatform) ensureBookExists(job *AutoPublishJob, cred, novelName string) string {
 	apLogger.Printf(" task=%s 作品不存在(qimao), 开始创建...", job.TaskID)
 
-	_, description, _, roles, fetchErr := p.mgr.fetchSkillMeta(job.SkillID)
+	_, description, _, roles, titles, _, fetchErr := p.mgr.fetchSkillMeta(job.SkillID)
 	p.logRolesTrace(job.TaskID, "ensureBookExists.fetchSkillMeta", roles, fetchErr)
 	if fetchErr != nil {
 		apLogger.Printf(" task=%s 获取skill元信息失败(qimao): %v", job.TaskID, fetchErr)
@@ -507,6 +514,7 @@ func (p *QimaoPlatform) ensureBookExists(job *AutoPublishJob, cred, novelName st
 		apLogger.Printf(" task=%s 获取建书选项失败(qimao): %s", job.TaskID, optErr.ErrorMessage)
 	}
 
+	// 首次用 novelName 建书（原有路径）
 	p.logRolesTrace(job.TaskID, "ensureBookExists.beforeCreateBook", fmt.Sprintf("novelName=%s description=[%d]chars roles=%q", novelName, len(description), roles), nil)
 	createResult := p.adapter.CreateBook(job.stopCtx, cred, novelName, description, roles, nil, bookOpt)
 	if createResult.Status == "ok" && createResult.PostID != "" {
@@ -515,6 +523,30 @@ func (p *QimaoPlatform) ensureBookExists(job *AutoPublishJob, cred, novelName st
 		return createResult.PostID
 	}
 
+	// 书名冲突(40003009)，用 titles 重试
+	if createResult.ErrorCode == "40003009" {
+		apLogger.Printf(" task=%s 书名冲突(qimao), 用titles重试, titles=%v", job.TaskID, titles)
+		for _, altName := range titles {
+			if altName == "" || altName == novelName {
+				continue
+			}
+			apLogger.Printf(" task=%s 重试创建作品(qimao): altName=%s", job.TaskID, altName)
+			createResult = p.adapter.CreateBook(job.stopCtx, cred, altName, description, roles, nil, bookOpt)
+			if createResult.Status == "ok" && createResult.PostID != "" {
+				apLogger.Printf(" task=%s 创建作品成功(qimao,alt): bookId=%s altName=%s",
+					job.TaskID, createResult.PostID, altName)
+				p.setNewBookInfo(job, cred, createResult.PostID, altName)
+				return createResult.PostID
+			}
+			// 非书名冲突错误，不继续重试
+			if createResult.ErrorCode != "40003009" {
+				apLogger.Printf(" task=%s 建书失败(非书名冲突): errorCode=%s", job.TaskID, createResult.ErrorCode)
+				break
+			}
+		}
+	}
+
+	// 最终降级：硬编码兜底名
 	altNames := []string{novelName + "之续", novelName + "新篇"}
 	for _, altName := range altNames {
 		apLogger.Printf(" task=%s 重试创建作品(qimao): altName=%s", job.TaskID, altName)
@@ -522,7 +554,7 @@ func (p *QimaoPlatform) ensureBookExists(job *AutoPublishJob, cred, novelName st
 		if createResult.Status == "ok" && createResult.PostID != "" {
 			apLogger.Printf(" task=%s 创建作品成功(qimao,alt): bookId=%s altName=%s",
 				job.TaskID, createResult.PostID, altName)
-		p.setNewBookInfo(job, cred, createResult.PostID, altName)
+			p.setNewBookInfo(job, cred, createResult.PostID, altName)
 			return createResult.PostID
 		}
 	}
@@ -533,7 +565,7 @@ func (p *QimaoPlatform) ensureBookExists(job *AutoPublishJob, cred, novelName st
 
 // setNewBookInfo 从 skill 元数据中提取书籍信息并调用 SetBookInfo 上传封面和设置分类/简介。
 func (p *QimaoPlatform) setNewBookInfo(job *AutoPublishJob, cred, bookId, novelName string) {
-	_, description, _, roles, fetchErr := p.mgr.fetchSkillMeta(job.SkillID)
+	_, description, _, roles, _, _, fetchErr := p.mgr.fetchSkillMeta(job.SkillID)
 	if fetchErr != nil {
 		apLogger.Printf(" task=%s 获取skill元信息失败(qimao): %v", job.TaskID, fetchErr)
 		return

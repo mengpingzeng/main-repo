@@ -28,6 +28,7 @@ type skillResponseFromL1 struct {
 	ScriptsPath      string                 `json:"scripts_path"`
 	TemplatesPath    string                 `json:"templates_path"`
 	ExamplesPath     string                 `json:"examples_path"`
+	ChapterNames     []string               `json:"chapter_names"`
 }
 
 type modelRecommended struct {
@@ -88,6 +89,7 @@ func FetchSkillFromL1(ctx context.Context, registryURL, skillID string) (SkillDe
 		OutputSchema:     schemaStr,
 		RawContent:       l1.PromptContent,
 		Constraints:      extractConstraints(l1.PromptContent),
+		ChapterNames:     l1.ChapterNames,
 	}, nil
 }
 

@@ -118,18 +118,23 @@ func (r *registryImpl) loadOneSkill(ctx context.Context, skillDir, dirName strin
 	}
 
 	novelMetaPath := filepath.Join(skillDir, "novel_metadata.json")
+	var titles []string
+	var chapterNames []string
 	if nmBytes, err := os.ReadFile(novelMetaPath); err == nil {
 		var nm struct {
-			Title        string `json:"title"`
-			Description  string `json:"description"`
-			Genre        string `json:"genre"`
-			CoverImage   string `json:"cover_image"`
-			Protagonist  string `json:"protagonist"`
-			Protagonists string `json:"protagonists"`
+			Title        interface{} `json:"title"`
+			Description  string      `json:"description"`
+			Genre        string      `json:"genre"`
+			CoverImage   string      `json:"cover_image"`
+			Protagonist  string      `json:"protagonist"`
+			Protagonists string      `json:"protagonists"`
+			ChapterNames []string    `json:"chapter_names"`
 		}
 		if json.Unmarshal(nmBytes, &nm) == nil {
-			if nm.Title != "" {
-				name = nm.Title
+			titles = normalizeTitleList(nm.Title)
+			chapterNames = nm.ChapterNames
+			if len(titles) > 0 {
+				name = titles[0]
 			}
 			if nm.Description != "" {
 				description = nm.Description
@@ -180,6 +185,8 @@ func (r *registryImpl) loadOneSkill(ctx context.Context, skillDir, dirName strin
 		CoverImage:       coverImage,
 		SkillDirectory:   skillDir,
 		Roles:            roles,
+		Titles:           titles,
+		ChapterNames:     chapterNames,
 	}
 
 	if err := r.store.Save(ctx, pkg, promptBytes); err != nil {
@@ -266,4 +273,26 @@ func parseProtagonists(raw string) string {
 		}
 	}
 	return strings.Join(names, ",")
+}
+
+func normalizeTitleList(v interface{}) []string {
+	if v == nil {
+		return nil
+	}
+	switch val := v.(type) {
+	case string:
+		if val == "" {
+			return nil
+		}
+		return []string{val}
+	case []interface{}:
+		var result []string
+		for _, item := range val {
+			if s, ok := item.(string); ok && s != "" {
+				result = append(result, s)
+			}
+		}
+		return result
+	}
+	return nil
 }

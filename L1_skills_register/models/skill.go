@@ -23,6 +23,8 @@ type SkillPackage struct {
 	CoverImage      string                 `yaml:"-" json:"-"`
 	SkillDirectory  string                 `yaml:"-" json:"-"`
 	Roles           string                 `yaml:"-" json:"-"`
+	Titles          []string               `yaml:"-" json:"-"`
+	ChapterNames    []string               `yaml:"-" json:"-"`
 }
 
 type InputDef struct {

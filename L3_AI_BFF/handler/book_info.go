@@ -33,7 +33,7 @@ type bookChapter struct {
 	ArchivedAt    string `json:"archived_at,omitempty"`
 }
 
-func BookGetInfo(sessionMgrURL string) gin.HandlerFunc {
+func BookGetInfo(sessionMgrURL, skillRegistryURL string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		logger := middleware.GetBFFLogger(c)
 		taskID := c.Param("tid")
@@ -48,6 +48,7 @@ func BookGetInfo(sessionMgrURL string) gin.HandlerFunc {
 		}
 
 		var task struct {
+			SkillID                 string `json:"skill_id"`
 			NovelName              string `json:"novel_name"`
 			VolumeName             string `json:"volume_name"`
 			ChapterNumber          int    `json:"chapter_number"`
@@ -61,6 +62,11 @@ func BookGetInfo(sessionMgrURL string) gin.HandlerFunc {
 			}
 			model.Error(c, model.ErrInternal)
 			return
+		}
+
+		var chapterNames []string
+		if task.SkillID != "" {
+			chapterNames = fetchChapterNames(skillRegistryURL, task.SkillID)
 		}
 
 		sessionsData, err := doDownstreamGet(sessionMgrURL + "/api/task/" + taskID + "/sessions")
@@ -85,7 +91,7 @@ func BookGetInfo(sessionMgrURL string) gin.HandlerFunc {
 
 	validSessions := filterValidSessions(sessionsResp.Sessions)
 
-	volumes := buildVolumeTree(validSessions)
+	volumes := buildVolumeTree(validSessions, chapterNames)
 
 		hasUnclassified := false
 		for i := range volumes {
@@ -158,12 +164,16 @@ func filterValidSessions(sessions []bookChapterRaw) []bookChapterRaw {
 	return result
 }
 
-func buildVolumeTree(sessions []bookChapterRaw) []bookVolume {
+func buildVolumeTree(sessions []bookChapterRaw, chapterNames []string) []bookVolume {
 	volMap := make(map[string][]bookChapter)
 	volOrder := make([]string, 0)
 	seen := make(map[string]bool)
 
 	for _, s := range sessions {
+		title := strings.TrimSpace(s.ChapterTitle)
+		if s.ChapterNumber-1 < len(chapterNames) && chapterNames[s.ChapterNumber-1] != "" {
+			title = chapterNames[s.ChapterNumber-1]
+		}
 		phase := "draft"
 		if s.PostID != "" {
 			phase = "published"
@@ -171,7 +181,7 @@ func buildVolumeTree(sessions []bookChapterRaw) []bookVolume {
 		ch := bookChapter{
 			ChapterNumber: s.ChapterNumber,
 			SessionID:     s.SessionID,
-			Title:         strings.TrimSpace(s.ChapterTitle),
+			Title:         title,
 			Status:        s.Status,
 			DraftVersion:  s.DraftVersion,
 			Phase:         phase,
@@ -261,4 +271,19 @@ func doDownstreamGet(url string) ([]byte, error) {
 		return nil, fmt.Errorf("upstream error %d: %s", resp.StatusCode, string(body))
 	}
 	return body, nil
+}
+
+func fetchChapterNames(skillRegistryURL, skillID string) []string {
+	url := fmt.Sprintf("%s/api/skill/%s", skillRegistryURL, skillID)
+	data, err := doDownstreamGet(url)
+	if err != nil {
+		return nil
+	}
+	var resp struct {
+		ChapterNames []string `json:"chapter_names"`
+	}
+	if err := json.Unmarshal(data, &resp); err != nil {
+		return nil
+	}
+	return resp.ChapterNames
 }

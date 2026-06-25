@@ -704,7 +704,13 @@ func (m *AutoPublishManager) phaseGenerate(job *AutoPublishJob, state *chapterGe
 
 	log.Printf("[auto_publish] task=%s AI生成完成: title=%s contentLen=%d", taskID, chapterTitle, len(draft))
 
-	if chapterTitle == "" {
+	_, _, _, _, _, chapterNames, fetchErr := m.fetchSkillMeta(job.SkillID)
+	if fetchErr != nil {
+		log.Printf("[auto_publish] task=%s 获取chapterNames失败: %v", taskID, fetchErr)
+	}
+	if state.chapterNumber-1 < len(chapterNames) && chapterNames[state.chapterNumber-1] != "" {
+		chapterTitle = chapterNames[state.chapterNumber-1]
+	} else if chapterTitle == "" {
 		chapterTitle = fallbackChapterTitle(draft)
 		log.Printf("[auto_publish] task=%s 标题为空，从正文生成兜底标题: %s", taskID, chapterTitle)
 	}
@@ -1161,23 +1167,25 @@ func (m *AutoPublishManager) doGet(url string) ([]byte, error) {
 	return respBody, nil
 }
 
-func (m *AutoPublishManager) fetchSkillMeta(skillID string) (name, description, category, roles string, err error) {
+func (m *AutoPublishManager) fetchSkillMeta(skillID string) (name, description, category, roles string, titles, chapterNames []string, err error) {
 	url := fmt.Sprintf("%s/api/skill/%s", m.skillRegistryURL, skillID)
 	respBody, err := m.doGet(url)
 	if err != nil {
-		return "", "", "", "", fmt.Errorf("fetch skill meta: %w", err)
+		return "", "", "", "", nil, nil, fmt.Errorf("fetch skill meta: %w", err)
 	}
 	var meta struct {
-		Name        string `json:"name"`
-		Description string `json:"description"`
-		Category    string `json:"category"`
-		Roles       string `json:"roles"`
+		Name         string   `json:"name"`
+		Description  string   `json:"description"`
+		Category     string   `json:"category"`
+		Roles        string   `json:"roles"`
+		Titles       []string `json:"titles"`
+		ChapterNames []string `json:"chapter_names"`
 	}
 	if err := json.Unmarshal(respBody, &meta); err != nil {
-		return "", "", "", "", fmt.Errorf("parse skill meta: %w", err)
+		return "", "", "", "", nil, nil, fmt.Errorf("parse skill meta: %w", err)
 	}
-	log.Printf("[auto_publish] fetchSkillMeta: skill=%s name=%s category=%s roles=%s", skillID, meta.Name, meta.Category, meta.Roles)
-	return meta.Name, meta.Description, meta.Category, meta.Roles, nil
+	log.Printf("[auto_publish] fetchSkillMeta: skill=%s name=%s category=%s roles=%s titles=%v chapterNames=%d", skillID, meta.Name, meta.Category, meta.Roles, meta.Titles, len(meta.ChapterNames))
+	return meta.Name, meta.Description, meta.Category, meta.Roles, meta.Titles, meta.ChapterNames, nil
 }
 
 func (m *AutoPublishManager) downloadRenderedCover(skillID, author, name string) ([]byte, error) {

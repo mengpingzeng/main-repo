@@ -576,6 +576,16 @@ func (sm *SessionManager) resolveChapterNoticeMeta(taskID, sessionID string, ses
 		chapterNo = sm.inferChapterNumberForSession(taskID, sess)
 	}
 	chapterTitle = parseDraftChapterTitle(draftPath)
+	if taskID != "" {
+		if task, err := sm.store.GetTask(taskID); err == nil && task.SkillID != "" {
+			sm.fetchedMu.RLock()
+			sk, ok := sm.fetchedSkills[task.SkillID]
+			sm.fetchedMu.RUnlock()
+			if ok && chapterNo > 0 && chapterNo-1 < len(sk.ChapterNames) && sk.ChapterNames[chapterNo-1] != "" {
+				chapterTitle = sk.ChapterNames[chapterNo-1]
+			}
+		}
+	}
 	volumeName = ""
 	if sess != nil {
 		volumeName = strings.TrimSpace(sess.VolumeName)
@@ -1725,7 +1735,14 @@ func (sm *SessionManager) ScanDraftFile(sessionID string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return string(data), nil
+	content := string(data)
+	if idx := findChapterBodyStart(content); idx >= 0 {
+		body := content[idx:]
+		if nl := strings.Index(body, "\n"); nl >= 0 {
+			content = strings.TrimLeft(body[nl:], "\n\r ")
+		}
+	}
+	return content, nil
 }
 
 func stripMarkdownCodeFences(text string) string {

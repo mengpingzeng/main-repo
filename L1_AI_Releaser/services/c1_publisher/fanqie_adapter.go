@@ -92,6 +92,7 @@ type fanqieInput struct {
 	Category      string `json:"category,omitempty"`
 	CoverBase64   string `json:"coverBase64,omitempty"`
 	Roles         string `json:"roles,omitempty"`
+	AltNames      []string `json:"altNames,omitempty"`
 }
 
 type fanqieOutput struct {
@@ -280,7 +281,7 @@ func (a *FanqiePublishAdapter) SaveDraftViaPageAPI(ctx context.Context, title, c
 
 // GetPlatformInfo 获取番茄小说平台的草稿箱、已发布章节、分卷信息。
 // 用于发布前状态检查和发布后验证。
-func (a *FanqiePublishAdapter) GetPlatformInfo(ctx context.Context, novelName, credentials string, workId string) (*PlatformInfo, *PublishResult) {
+func (a *FanqiePublishAdapter) GetPlatformInfo(ctx context.Context, novelName, credentials string, workId string, altNames []string) (*PlatformInfo, *PublishResult) {
 	if credentials == "" {
 		return nil, a.fail(ErrCodeCredentialFailed, "fanqie cookie is empty", "")
 	}
@@ -293,6 +294,7 @@ func (a *FanqiePublishAdapter) GetPlatformInfo(ctx context.Context, novelName, c
 		Action:    "get_platform_info",
 		NovelName: novelName,
 		WorkID:    workId,
+		AltNames:  altNames,
 	}
 
 	authorName, resolveErr := a.ResolveAuthorName(ctx, credentials)
